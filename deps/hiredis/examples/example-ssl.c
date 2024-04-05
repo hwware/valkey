@@ -14,7 +14,7 @@ int main(int argc, char **argv) {
     redisSSLContext *ssl;
     redisSSLContextError ssl_error = REDIS_SSL_CTX_NONE;
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     if (argc < 4) {
         printf("Usage: %s <host> <port> <cert> <key> [ca]\n", argv[0]);
         exit(1);

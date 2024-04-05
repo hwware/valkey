@@ -263,7 +263,7 @@ static struct config {
     int eval_ldb_end;   /* Lua debugging session ended. */
     int enable_ldb_on_eval; /* Handle manual SCRIPT DEBUG + EVAL commands. */
     int last_cmd_type;
-    redisReply *last_reply;
+    serverReply *last_reply;
     int verbose;
     int set_errcode;
     clusterManagerCommand cluster_manager_command;
@@ -432,13 +432,13 @@ static int helpEntriesLen = 0;
 static void cliLegacyIntegrateHelp(void) {
     if (cliConnect(CC_QUIET) == REDIS_ERR) return;
 
-    redisReply *reply = redisCommand(context, "COMMAND");
+    serverReply *reply = redisCommand(context, "COMMAND");
     if(reply == NULL || reply->type != REDIS_REPLY_ARRAY) return;
 
     /* Scan the array reported by COMMAND and fill only the entries that
      * don't already match what we have. */
     for (size_t j = 0; j < reply->elements; j++) {
-        redisReply *entry = reply->element[j];
+        serverReply *entry = reply->element[j];
         if (entry->type != REDIS_REPLY_ARRAY || entry->elements < 4 ||
             entry->element[0]->type != REDIS_REPLY_STRING ||
             entry->element[1]->type != REDIS_REPLY_INTEGER ||
@@ -494,15 +494,15 @@ static sds sdscat_orempty(sds params, const char *value) {
 
 static sds makeHint(char **inputargv, int inputargc, int cmdlen, struct commandDocs docs);
 
-static void cliAddCommandDocArg(cliCommandArg *cmdArg, redisReply *argMap);
+static void cliAddCommandDocArg(cliCommandArg *cmdArg, serverReply *argMap);
 
-static void cliMakeCommandDocArgs(redisReply *arguments, cliCommandArg *result) {
+static void cliMakeCommandDocArgs(serverReply *arguments, cliCommandArg *result) {
     for (size_t j = 0; j < arguments->elements; j++) {
         cliAddCommandDocArg(&result[j], arguments->element[j]);
     }
 }
 
-static void cliAddCommandDocArg(cliCommandArg *cmdArg, redisReply *argMap) {
+static void cliAddCommandDocArg(cliCommandArg *cmdArg, serverReply *argMap) {
     if (argMap->type != REDIS_REPLY_MAP && argMap->type != REDIS_REPLY_ARRAY) {
         return;
     }
@@ -542,12 +542,12 @@ static void cliAddCommandDocArg(cliCommandArg *cmdArg, redisReply *argMap) {
                 cmdArg->type = ARG_TYPE_BLOCK;
             }
         } else if (!strcmp(key, "arguments")) {
-            redisReply *arguments = argMap->element[i + 1];
+            serverReply *arguments = argMap->element[i + 1];
             cmdArg->subargs = zcalloc(arguments->elements * sizeof(cliCommandArg));
             cmdArg->numsubargs = arguments->elements;
             cliMakeCommandDocArgs(arguments, cmdArg->subargs);
         } else if (!strcmp(key, "flags")) {
-            redisReply *flags = argMap->element[i + 1];
+            serverReply *flags = argMap->element[i + 1];
             assert(flags->type == REDIS_REPLY_SET || flags->type == REDIS_REPLY_ARRAY);
             for (size_t j = 0; j < flags->elements; j++) {
                 assert(flags->element[j]->type == REDIS_REPLY_STATUS);
@@ -602,7 +602,7 @@ static void cliFillInCommandHelpEntry(helpEntry *help, char *cmdname, char *subc
  * If the command has subcommands, this is called recursively for the subcommands.
  */
 static helpEntry *cliInitCommandHelpEntry(char *cmdname, char *subcommandname,
-                                          helpEntry *next, redisReply *specs,
+                                          helpEntry *next, serverReply *specs,
                                           dict *groups) {
     helpEntry *help = next++;
     cliFillInCommandHelpEntry(help, cmdname, subcommandname);
@@ -612,15 +612,15 @@ static helpEntry *cliInitCommandHelpEntry(char *cmdname, char *subcommandname,
         assert(specs->element[j]->type == REDIS_REPLY_STRING);
         char *key = specs->element[j]->str;
         if (!strcmp(key, "summary")) {
-            redisReply *reply = specs->element[j + 1];
+            serverReply *reply = specs->element[j + 1];
             assert(reply->type == REDIS_REPLY_STRING);
             help->docs.summary = sdsnew(reply->str);
         } else if (!strcmp(key, "since")) {
-            redisReply *reply = specs->element[j + 1];
+            serverReply *reply = specs->element[j + 1];
             assert(reply->type == REDIS_REPLY_STRING);
             help->docs.since = sdsnew(reply->str);
         } else if (!strcmp(key, "group")) {
-            redisReply *reply = specs->element[j + 1];
+            serverReply *reply = specs->element[j + 1];
             assert(reply->type == REDIS_REPLY_STRING);
             help->docs.group = sdsnew(reply->str);
             sds group = sdsdup(help->docs.group);
@@ -628,19 +628,19 @@ static helpEntry *cliInitCommandHelpEntry(char *cmdname, char *subcommandname,
                 sdsfree(group);
             }
         } else if (!strcmp(key, "arguments")) {
-            redisReply *arguments = specs->element[j + 1];
+            serverReply *arguments = specs->element[j + 1];
             assert(arguments->type == REDIS_REPLY_ARRAY);
             help->docs.args = zcalloc(arguments->elements * sizeof(cliCommandArg));
             help->docs.numargs = arguments->elements;
             cliMakeCommandDocArgs(arguments, help->docs.args);
             help->docs.params = makeHint(NULL, 0, 0, help->docs);
         } else if (!strcmp(key, "subcommands")) {
-            redisReply *subcommands = specs->element[j + 1];
+            serverReply *subcommands = specs->element[j + 1];
             assert(subcommands->type == REDIS_REPLY_MAP || subcommands->type == REDIS_REPLY_ARRAY);
             for (size_t i = 0; i < subcommands->elements; i += 2) {
                 assert(subcommands->element[i]->type == REDIS_REPLY_STRING);
                 char *subcommandname = subcommands->element[i]->str;
-                redisReply *subcommand = subcommands->element[i + 1];
+                serverReply *subcommand = subcommands->element[i + 1];
                 assert(subcommand->type == REDIS_REPLY_MAP || subcommand->type == REDIS_REPLY_ARRAY);
                 next = cliInitCommandHelpEntry(cmdname, subcommandname, next, subcommand, groups);
             }
@@ -650,7 +650,7 @@ static helpEntry *cliInitCommandHelpEntry(char *cmdname, char *subcommandname,
 }
 
 /* Returns the total number of commands and subcommands in the command docs table. */
-static size_t cliCountCommands(redisReply* commandTable) {
+static size_t cliCountCommands(serverReply* commandTable) {
     size_t numCommands = commandTable->elements / 2;
 
     /* The command docs table maps command names to a map of their specs. */    
@@ -658,12 +658,12 @@ static size_t cliCountCommands(redisReply* commandTable) {
         assert(commandTable->element[i]->type == REDIS_REPLY_STRING);  /* Command name. */
         assert(commandTable->element[i + 1]->type == REDIS_REPLY_MAP ||
                commandTable->element[i + 1]->type == REDIS_REPLY_ARRAY);
-        redisReply *map = commandTable->element[i + 1];
+        serverReply *map = commandTable->element[i + 1];
         for (size_t j = 0; j < map->elements; j += 2) {
             assert(map->element[j]->type == REDIS_REPLY_STRING);
             char *key = map->element[j]->str;
             if (!strcmp(key, "subcommands")) {
-                redisReply *subcommands = map->element[j + 1];
+                serverReply *subcommands = map->element[j + 1];
                 assert(subcommands->type == REDIS_REPLY_MAP || subcommands->type == REDIS_REPLY_ARRAY);
                 numCommands += subcommands->elements / 2;
             }
@@ -712,7 +712,7 @@ void cliInitGroupHelpEntries(dict *groups) {
 }
 
 /* Initializes help entries for all commands in the COMMAND DOCS reply. */
-void cliInitCommandHelpEntries(redisReply *commandTable, dict *groups) {
+void cliInitCommandHelpEntries(serverReply *commandTable, dict *groups) {
     helpEntry *next = helpEntries;
     for (size_t i = 0; i < commandTable->elements; i += 2) {
         assert(commandTable->element[i]->type == REDIS_REPLY_STRING);
@@ -720,7 +720,7 @@ void cliInitCommandHelpEntries(redisReply *commandTable, dict *groups) {
 
         assert(commandTable->element[i + 1]->type == REDIS_REPLY_MAP ||
                commandTable->element[i + 1]->type == REDIS_REPLY_ARRAY);
-        redisReply *cmdspecs = commandTable->element[i + 1];
+        serverReply *cmdspecs = commandTable->element[i + 1];
         next = cliInitCommandHelpEntry(cmdname, NULL, next, cmdspecs, groups);
     }
 }
@@ -841,7 +841,7 @@ static size_t cliLegacyCountCommands(struct commandDocs *commands, sds version) 
  * When not connected, or not possible, returns NULL. */
 static sds cliGetServerVersion(void) {
     static const char *key = "\nredis_version:";
-    redisReply *serverInfo = NULL;
+    serverReply *serverInfo = NULL;
     char *pos;
 
     if (config.server_version != NULL) {
@@ -902,7 +902,7 @@ static void cliInitHelp(void) {
         NULL,                       /* val destructor */
         NULL                        /* allow to expand */
     };
-    redisReply *commandTable;
+    serverReply *commandTable;
     dict *groups;
 
     if (cliConnect(CC_QUIET) == REDIS_ERR) {
@@ -1557,7 +1557,7 @@ static void cliPressAnyKeyTTY(void) {
 
 /* Send AUTH command to the server */
 static int cliAuth(redisContext *ctx, char *user, char *auth) {
-    redisReply *reply;
+    serverReply *reply;
     if (auth == NULL) return REDIS_OK;
 
     if (user == NULL)
@@ -1581,7 +1581,7 @@ static int cliAuth(redisContext *ctx, char *user, char *auth) {
 
 /* Send SELECT input_dbnum to the server */
 static int cliSelect(void) {
-    redisReply *reply;
+    serverReply *reply;
     if (config.conn_info.input_dbnum == config.dbnum) return REDIS_OK;
 
     reply = redisCommand(context,"SELECT %d",config.conn_info.input_dbnum);
@@ -1604,7 +1604,7 @@ static int cliSelect(void) {
 
 /* Select RESP3 mode if redis-cli was started with the -3 option.  */
 static int cliSwitchProto(void) {
-    redisReply *reply;
+    serverReply *reply;
     if (!config.resp3 || config.resp2) return REDIS_OK;
 
     reply = redisCommand(context,"HELLO 3");
@@ -1718,7 +1718,7 @@ static int cliConnect(int flags) {
 /* In cluster, if server replies ASK, we will redirect to a different node.
  * Before sending the real command, we need to send ASKING command first. */
 static int cliSendAsking(void) {
-    redisReply *reply;
+    serverReply *reply;
 
     config.cluster_send_asking = 0;
     if (context == NULL) {
@@ -1743,7 +1743,7 @@ static void cliPrintContextError(void) {
     fprintf(stderr,"Error: %s\n",context->errstr);
 }
 
-static int isInvalidateReply(redisReply *reply) {
+static int isInvalidateReply(serverReply *reply) {
     return reply->type == REDIS_REPLY_PUSH && reply->elements == 2 &&
         reply->element[0]->type == REDIS_REPLY_STRING &&
         !strncmp(reply->element[0]->str, "invalidate", 10) &&
@@ -1753,11 +1753,11 @@ static int isInvalidateReply(redisReply *reply) {
 /* Special display handler for RESP3 'invalidate' messages.
  * This function does not validate the reply, so it should
  * already be confirmed correct */
-static sds cliFormatInvalidateTTY(redisReply *r) {
+static sds cliFormatInvalidateTTY(serverReply *r) {
     sds out = sdsnew("-> invalidate: ");
 
     for (size_t i = 0; i < r->element[1]->elements; i++) {
-        redisReply *key = r->element[1]->element[i];
+        serverReply *key = r->element[1]->element[i];
         assert(key->type == REDIS_REPLY_STRING);
 
         out = sdscatfmt(out, "'%s'", key->str, key->len);
@@ -1769,7 +1769,7 @@ static sds cliFormatInvalidateTTY(redisReply *r) {
 }
 
 /* Returns non-zero if cliFormatReplyTTY renders the reply in multiple lines. */
-static int cliIsMultilineValueTTY(redisReply *r) {
+static int cliIsMultilineValueTTY(serverReply *r) {
     switch (r->type) {
     case REDIS_REPLY_ARRAY:
     case REDIS_REPLY_SET:
@@ -1786,7 +1786,7 @@ static int cliIsMultilineValueTTY(redisReply *r) {
     }
 }
 
-static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
+static sds cliFormatReplyTTY(serverReply *r, char *prefix) {
     sds out = sdsempty();
     switch (r->type) {
     case REDIS_REPLY_ERROR:
@@ -1905,7 +1905,7 @@ static sds cliFormatReplyTTY(redisReply *r, char *prefix) {
 }
 
 /* Returns 1 if the reply is a pubsub pushed reply. */
-int isPubsubPush(redisReply *r) {
+int isPubsubPush(serverReply *r) {
     if (r == NULL ||
         r->type != (config.current_resp3 ? REDIS_REPLY_PUSH : REDIS_REPLY_ARRAY) ||
         r->elements < 3 ||
@@ -1967,7 +1967,7 @@ sds sdsCatColorizedLdbReply(sds o, char *s, size_t len) {
     return sdscatcolor(o,s,len,color);
 }
 
-static sds cliFormatReplyRaw(redisReply *r) {
+static sds cliFormatReplyRaw(serverReply *r) {
     sds out = sdsempty(), tmp;
     size_t i;
 
@@ -2040,7 +2040,7 @@ static sds cliFormatReplyRaw(redisReply *r) {
     return out;
 }
 
-static sds cliFormatReplyCSV(redisReply *r) {
+static sds cliFormatReplyCSV(serverReply *r) {
     unsigned int i;
 
     sds out = sdsempty();
@@ -2109,7 +2109,7 @@ static sds jsonStringOutput(sds out, const char *p, int len, int mode) {
     }
 }
 
-static sds cliFormatReplyJson(sds out, redisReply *r, int mode) {
+static sds cliFormatReplyJson(sds out, serverReply *r, int mode) {
     unsigned int i;
 
     switch (r->type) {
@@ -2149,7 +2149,7 @@ static sds cliFormatReplyJson(sds out, redisReply *r, int mode) {
     case REDIS_REPLY_MAP:
         out = sdscat(out,"{");
         for (i = 0; i < r->elements; i += 2) {
-            redisReply *key = r->element[i];
+            serverReply *key = r->element[i];
             if (key->type == REDIS_REPLY_ERROR ||
                 key->type == REDIS_REPLY_STATUS ||
                 key->type == REDIS_REPLY_STRING ||
@@ -2181,7 +2181,7 @@ static sds cliFormatReplyJson(sds out, redisReply *r, int mode) {
 }
 
 /* Generate reply strings in various output modes */
-static sds cliFormatReply(redisReply *reply, int mode, int verbatim) {
+static sds cliFormatReply(serverReply *reply, int mode, int verbatim) {
     sds out;
 
     if (verbatim) {
@@ -2224,7 +2224,7 @@ static void cliPushHandler(void *privdata, void *reply) {
 
 static int cliReadReply(int output_raw_strings) {
     void *_reply;
-    redisReply *reply;
+    serverReply *reply;
     sds out = NULL;
     int output = 1;
 
@@ -2259,7 +2259,7 @@ static int cliReadReply(int output_raw_strings) {
         return REDIS_ERR; /* avoid compiler warning */
     }
 
-    config.last_reply = reply = (redisReply*)_reply;
+    config.last_reply = reply = (serverReply*)_reply;
 
     config.last_cmd_type = reply->type;
 
@@ -2323,7 +2323,7 @@ static void cliWaitForMessagesOrStdin(void) {
     cliPressAnyKeyTTY();
     while (config.pubsub_mode) {
         /* First check if there are any buffered replies. */
-        redisReply *reply;
+        serverReply *reply;
         do {
             if (redisGetReplyFromReader(context, (void **)&reply) != REDIS_OK) {
                 cliPrintContextError();
@@ -2587,8 +2587,8 @@ static int cliSendCommand(int argc, char **argv, long repeat) {
 }
 
 /* Send a command reconnecting the link if needed. */
-static redisReply *reconnectingRedisCommand(redisContext *c, const char *fmt, ...) {
-    redisReply *reply = NULL;
+static serverReply *reconnectingRedisCommand(redisContext *c, const char *fmt, ...) {
+    serverReply *reply = NULL;
     int tries = 0;
     va_list ap;
 
@@ -3591,7 +3591,7 @@ static int evalMode(int argc, char **argv) {
 
         /* If we are debugging a script, enable the Lua debugger. */
         if (config.eval_ldb) {
-            redisReply *reply = redisCommand(context,
+            serverReply *reply = redisCommand(context,
                     config.eval_ldb_sync ?
                     "SCRIPT DEBUG sync": "SCRIPT DEBUG yes");
             if (reply) freeReplyObject(reply);
@@ -3721,7 +3721,7 @@ static dictType clusterManagerLinkDictType = {
 };
 
 typedef int clusterManagerCommandProc(int argc, char **argv);
-typedef int (*clusterManagerOnReplyError)(redisReply *reply,
+typedef int (*clusterManagerOnReplyError)(serverReply *reply,
     clusterManagerNode *n, int bulk_idx);
 
 /* Cluster Manager helper functions */
@@ -4036,7 +4036,7 @@ static sds clusterManagerGetNodeRDBFilename(clusterManagerNode *node) {
  * of reply error (it's up to the caller function to free it), elsewhere
  * the error is directly printed. */
 static int clusterManagerCheckRedisReply(clusterManagerNode *n,
-                                         redisReply *r, char **err)
+                                         serverReply *r, char **err)
 {
     int is_err = 0;
     if (!r || (is_err = (r->type == REDIS_REPLY_ERROR))) {
@@ -4053,7 +4053,7 @@ static int clusterManagerCheckRedisReply(clusterManagerNode *n,
 
 /* Call MULTI command on a cluster node. */
 static int clusterManagerStartTransaction(clusterManagerNode *node) {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "MULTI");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "MULTI");
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
     if (reply) freeReplyObject(reply);
     return success;
@@ -4063,7 +4063,7 @@ static int clusterManagerStartTransaction(clusterManagerNode *node) {
 static int clusterManagerExecTransaction(clusterManagerNode *node,
                                          clusterManagerOnReplyError onerror)
 {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "EXEC");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "EXEC");
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
     if (success) {
         if (reply->type != REDIS_REPLY_ARRAY) {
@@ -4072,7 +4072,7 @@ static int clusterManagerExecTransaction(clusterManagerNode *node,
         }
         size_t i;
         for (i = 0; i < reply->elements; i++) {
-            redisReply *r = reply->element[i];
+            serverReply *r = reply->element[i];
             char *err = NULL;
             success = clusterManagerCheckRedisReply(node, r, &err);
             if (!success && onerror) success = onerror(r, node, i);
@@ -4115,7 +4115,7 @@ static int clusterManagerNodeConnect(clusterManagerNode *node) {
      * errors. */
     anetKeepAlive(NULL, node->context->fd, REDIS_CLI_KEEPALIVE_INTERVAL);
     if (config.conn_info.auth) {
-        redisReply *reply;
+        serverReply *reply;
         if (config.conn_info.user == NULL)
             reply = redisCommand(node->context,"AUTH %s", config.conn_info.auth);
         else
@@ -4194,10 +4194,10 @@ static void clusterManagerNodeResetSlots(clusterManagerNode *node) {
 }
 
 /* Call "INFO" redis command on the specified node and return the reply. */
-static redisReply *clusterManagerGetNodeRedisInfo(clusterManagerNode *node,
+static serverReply *clusterManagerGetNodeRedisInfo(clusterManagerNode *node,
                                                   char **err)
 {
-    redisReply *info = CLUSTER_MANAGER_COMMAND(node, "INFO");
+    serverReply *info = CLUSTER_MANAGER_COMMAND(node, "INFO");
     if (err != NULL) *err = NULL;
     if (info == NULL) return NULL;
     if (info->type == REDIS_REPLY_ERROR) {
@@ -4212,7 +4212,7 @@ static redisReply *clusterManagerGetNodeRedisInfo(clusterManagerNode *node,
 }
 
 static int clusterManagerNodeIsCluster(clusterManagerNode *node, char **err) {
-    redisReply *info = clusterManagerGetNodeRedisInfo(node, err);
+    serverReply *info = clusterManagerGetNodeRedisInfo(node, err);
     if (info == NULL) return 0;
     int is_cluster = (int) getLongInfoField(info->str, "cluster_enabled");
     freeReplyObject(info);
@@ -4222,7 +4222,7 @@ static int clusterManagerNodeIsCluster(clusterManagerNode *node, char **err) {
 /* Checks whether the node is empty. Node is considered not-empty if it has
  * some key or if it already knows other nodes */
 static int clusterManagerNodeIsEmpty(clusterManagerNode *node, char **err) {
-    redisReply *info = clusterManagerGetNodeRedisInfo(node, err);
+    serverReply *info = clusterManagerGetNodeRedisInfo(node, err);
     int is_empty = 1;
     if (info == NULL) return 0;
     if (strstr(info->str, "db0:") != NULL) {
@@ -4644,7 +4644,7 @@ static void clusterManagerShowClusterInfo(void) {
                 if (n->replicate && !strcmp(n->replicate, node->name))
                     replicas++;
             }
-            redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "DBSIZE");
+            serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "DBSIZE");
             if (reply != NULL && reply->type == REDIS_REPLY_INTEGER)
                 dbsize = reply->integer;
             if (dbsize < 0) {
@@ -4671,7 +4671,7 @@ static void clusterManagerShowClusterInfo(void) {
 /* Flush dirty slots configuration of the node by calling CLUSTER ADDSLOTS */
 static int clusterManagerAddSlots(clusterManagerNode *node, char**err)
 {
-    redisReply *reply = NULL;
+    serverReply *reply = NULL;
     void *_reply = NULL;
     int success = 1;
     /* First two args are used for the command itself. */
@@ -4701,7 +4701,7 @@ static int clusterManagerAddSlots(clusterManagerNode *node, char**err)
         success = 0;
         goto cleanup;
     }
-    reply = (redisReply*) _reply;
+    reply = (serverReply*) _reply;
     success = clusterManagerCheckRedisReply(node, reply, err);
 cleanup:
     zfree(argvlen);
@@ -4722,18 +4722,18 @@ static clusterManagerNode *clusterManagerGetSlotOwner(clusterManagerNode *n,
 {
     assert(slot >= 0 && slot < CLUSTER_MANAGER_SLOTS);
     clusterManagerNode *owner = NULL;
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(n, "CLUSTER SLOTS");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(n, "CLUSTER SLOTS");
     if (clusterManagerCheckRedisReply(n, reply, err)) {
         assert(reply->type == REDIS_REPLY_ARRAY);
         size_t i;
         for (i = 0; i < reply->elements; i++) {
-            redisReply *r = reply->element[i];
+            serverReply *r = reply->element[i];
             assert(r->type == REDIS_REPLY_ARRAY && r->elements >= 3);
             int from, to;
             from = r->element[0]->integer;
             to = r->element[1]->integer;
             if (slot < from || slot > to) continue;
-            redisReply *nr =  r->element[2];
+            serverReply *nr =  r->element[2];
             assert(nr->type == REDIS_REPLY_ARRAY && nr->elements >= 2);
             char *name = NULL;
             if (nr->elements >= 3)
@@ -4766,7 +4766,7 @@ static clusterManagerNode *clusterManagerGetSlotOwner(clusterManagerNode *n,
 static int clusterManagerSetSlot(clusterManagerNode *node1,
                                  clusterManagerNode *node2,
                                  int slot, const char *status, char **err) {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node1, "CLUSTER "
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node1, "CLUSTER "
                                                 "SETSLOT %d %s %s",
                                                 slot, status,
                                                 (char *) node2->name);
@@ -4790,7 +4790,7 @@ cleanup:
 }
 
 static int clusterManagerClearSlotStatus(clusterManagerNode *node, int slot) {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node,
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node,
         "CLUSTER SETSLOT %d %s", slot, "STABLE");
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
     if (reply) freeReplyObject(reply);
@@ -4800,7 +4800,7 @@ static int clusterManagerClearSlotStatus(clusterManagerNode *node, int slot) {
 static int clusterManagerDelSlot(clusterManagerNode *node, int slot,
                                  int ignore_unassigned_err)
 {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node,
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node,
         "CLUSTER DELSLOTS %d", slot);
     char *err = NULL;
     int success = clusterManagerCheckRedisReply(node, reply, &err);
@@ -4827,7 +4827,7 @@ static int clusterManagerDelSlot(clusterManagerNode *node, int slot,
 }
 
 static int clusterManagerAddSlot(clusterManagerNode *node, int slot) {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node,
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node,
         "CLUSTER ADDSLOTS %d", slot);
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
     if (reply) freeReplyObject(reply);
@@ -4837,7 +4837,7 @@ static int clusterManagerAddSlot(clusterManagerNode *node, int slot) {
 static signed int clusterManagerCountKeysInSlot(clusterManagerNode *node,
                                                 int slot)
 {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node,
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node,
         "CLUSTER COUNTKEYSINSLOT %d", slot);
     int count = -1;
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
@@ -4847,7 +4847,7 @@ static signed int clusterManagerCountKeysInSlot(clusterManagerNode *node,
 }
 
 static int clusterManagerBumpEpoch(clusterManagerNode *node) {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER BUMPEPOCH");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER BUMPEPOCH");
     int success = clusterManagerCheckRedisReply(node, reply, NULL);
     if (reply) freeReplyObject(reply);
     return success;
@@ -4856,7 +4856,7 @@ static int clusterManagerBumpEpoch(clusterManagerNode *node) {
 /* Callback used by clusterManagerSetSlotOwner transaction. It should ignore
  * errors except for ADDSLOTS errors.
  * Return 1 if the error should be ignored. */
-static int clusterManagerOnSetOwnerErr(redisReply *reply,
+static int clusterManagerOnSetOwnerErr(serverReply *reply,
     clusterManagerNode *n, int bulk_idx)
 {
     UNUSED(reply);
@@ -4888,7 +4888,7 @@ static int clusterManagerSetSlotOwner(clusterManagerNode *owner,
  * error. */
 static int clusterManagerCompareKeysValues(clusterManagerNode *n1,
                                           clusterManagerNode *n2,
-                                          redisReply *keys_reply,
+                                          serverReply *keys_reply,
                                           list *diffs)
 {
     size_t i, argc = keys_reply->elements + 2;
@@ -4900,22 +4900,22 @@ static int clusterManagerCompareKeysValues(clusterManagerNode *n1,
     argv[1] = "DIGEST-VALUE";
     argv_len[1] = 12;
     for (i = 0; i < keys_reply->elements; i++) {
-        redisReply *entry = keys_reply->element[i];
+        serverReply *entry = keys_reply->element[i];
         int idx = i + 2;
         argv[idx] = entry->str;
         argv_len[idx] = entry->len;
     }
     int success = 0;
     void *_reply1 = NULL, *_reply2 = NULL;
-    redisReply *r1 = NULL, *r2 = NULL;
+    serverReply *r1 = NULL, *r2 = NULL;
     redisAppendCommandArgv(n1->context,argc, (const char**)argv,argv_len);
     success = (redisGetReply(n1->context, &_reply1) == REDIS_OK);
     if (!success) goto cleanup;
-    r1 = (redisReply *) _reply1;
+    r1 = (serverReply *) _reply1;
     redisAppendCommandArgv(n2->context,argc, (const char**)argv,argv_len);
     success = (redisGetReply(n2->context, &_reply2) == REDIS_OK);
     if (!success) goto cleanup;
-    r2 = (redisReply *) _reply2;
+    r2 = (serverReply *) _reply2;
     success = (r1->type != REDIS_REPLY_ERROR && r2->type != REDIS_REPLY_ERROR);
     if (r1->type == REDIS_REPLY_ERROR) {
         CLUSTER_MANAGER_PRINT_REPLY_ERROR(n1, r1->str);
@@ -4948,13 +4948,13 @@ cleanup:
 /* Migrate keys taken from reply->elements. It returns the reply from the
  * MIGRATE command, or NULL if something goes wrong. If the argument 'dots'
  * is not NULL, a dot will be printed for every migrated key. */
-static redisReply *clusterManagerMigrateKeysInReply(clusterManagerNode *source,
+static serverReply *clusterManagerMigrateKeysInReply(clusterManagerNode *source,
                                                     clusterManagerNode *target,
-                                                    redisReply *reply,
+                                                    serverReply *reply,
                                                     int replace, int timeout,
                                                     char *dots)
 {
-    redisReply *migrate_reply = NULL;
+    serverReply *migrate_reply = NULL;
     char **argv = NULL;
     size_t *argv_len = NULL;
     int c = (replace ? 8 : 7);
@@ -5009,7 +5009,7 @@ static redisReply *clusterManagerMigrateKeysInReply(clusterManagerNode *source,
     argv_len[offset] = 4;
     offset++;
     for (i = 0; i < reply->elements; i++) {
-        redisReply *entry = reply->element[i];
+        serverReply *entry = reply->element[i];
         size_t idx = i + offset;
         assert(entry->type == REDIS_REPLY_STRING);
         argv[idx] = (char *) sdsnewlen(entry->str, entry->len);
@@ -5023,7 +5023,7 @@ static redisReply *clusterManagerMigrateKeysInReply(clusterManagerNode *source,
     int success = (redisGetReply(source->context, &_reply) == REDIS_OK);
     for (i = 0; i < reply->elements; i++) sdsfree(argv[i + offset]);
     if (!success) goto cleanup;
-    migrate_reply = (redisReply *) _reply;
+    migrate_reply = (serverReply *) _reply;
 cleanup:
     zfree(argv);
     zfree(argv_len);
@@ -5044,7 +5044,7 @@ static int clusterManagerMigrateKeysInSlot(clusterManagerNode *source,
                      CLUSTER_MANAGER_CMD_FLAG_REPLACE;
     while (1) {
         char *dots = NULL;
-        redisReply *reply = NULL, *migrate_reply = NULL;
+        serverReply *reply = NULL, *migrate_reply = NULL;
         reply = CLUSTER_MANAGER_COMMAND(source, "CLUSTER "
                                         "GETKEYSINSLOT %d %d", slot,
                                         pipeline);
@@ -5274,7 +5274,7 @@ static int clusterManagerMoveSlot(clusterManagerNode *source,
  * adding the slots defined in the masters. */
 static int clusterManagerFlushNodeConfig(clusterManagerNode *node, char **err) {
     if (!node->dirty) return 0;
-    redisReply *reply = NULL;
+    serverReply *reply = NULL;
     int is_err = 0, success = 1;
     if (err != NULL) *err = NULL;
     if (node->replicate != NULL) {
@@ -5366,7 +5366,7 @@ static void clusterManagerWaitForClusterJoin(void) {
 static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
                                       char **err)
 {
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
     int success = 1;
     *err = NULL;
     if (!clusterManagerCheckRedisReply(node, reply, err)) {
@@ -5640,7 +5640,7 @@ static sds clusterManagerGetConfigSignature(clusterManagerNode *node) {
     sds signature = NULL;
     int node_count = 0, i = 0, name_len = 0;
     char **node_configs = NULL;
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
     if (reply == NULL || reply->type == REDIS_REPLY_ERROR)
         goto cleanup;
     char *lines = reply->str, *p, *line;
@@ -5758,7 +5758,7 @@ static int clusterManagerIsConfigConsistent(void) {
 
 static list *clusterManagerGetDisconnectedLinks(clusterManagerNode *node) {
     list *links = NULL;
-    redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
+    serverReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
     if (!clusterManagerCheckRedisReply(node, reply, NULL)) goto cleanup;
     links = listCreate();
     char *lines = reply->str, *p, *line;
@@ -5898,7 +5898,7 @@ static clusterManagerNode * clusterManagerGetNodeWithMostKeysInSlot(list *nodes,
         clusterManagerNode *n = ln->value;
         if (n->flags & CLUSTER_MANAGER_FLAG_SLAVE || n->replicate)
             continue;
-        redisReply *r =
+        serverReply *r =
             CLUSTER_MANAGER_COMMAND(n, "CLUSTER COUNTKEYSINSLOT %d", slot);
         int success = clusterManagerCheckRedisReply(n, r, err);
         if (success) {
@@ -5994,7 +5994,7 @@ static int clusterManagerFixSlotsCoverage(char *all_slots) {
                 clusterManagerNode *n = ln->value;
                 if (n->flags & CLUSTER_MANAGER_FLAG_SLAVE || n->replicate)
                     continue;
-                redisReply *reply = CLUSTER_MANAGER_COMMAND(n,
+                serverReply *reply = CLUSTER_MANAGER_COMMAND(n,
                     "CLUSTER GETKEYSINSLOT %d %d", i, 1);
                 if (!clusterManagerCheckRedisReply(n, reply, NULL)) {
                     fixed = -1;
@@ -6204,7 +6204,7 @@ static int clusterManagerFixOpenSlot(int slot) {
         if (n->slots[slot]) {
             listAddNodeTail(owners, n);
         } else {
-            redisReply *r = CLUSTER_MANAGER_COMMAND(n,
+            serverReply *r = CLUSTER_MANAGER_COMMAND(n,
                 "CLUSTER COUNTKEYSINSLOT %d", slot);
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (success && r->integer > 0) {
@@ -6261,7 +6261,7 @@ static int clusterManagerFixOpenSlot(int slot) {
          * the owner, then is added to the importing list in case
          * it has keys in the slot. */
         if (!is_migrating && !is_importing && n != owner) {
-            redisReply *r = CLUSTER_MANAGER_COMMAND(n,
+            serverReply *r = CLUSTER_MANAGER_COMMAND(n,
                 "CLUSTER COUNTKEYSINSLOT %d", slot);
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (success && r->integer > 0) {
@@ -6461,7 +6461,7 @@ static int clusterManagerFixOpenSlot(int slot) {
         if (try_to_close_slot) {
             clusterManagerNode *n = listFirst(migrating)->value;
             if (!owner || owner != n) {
-                redisReply *r = CLUSTER_MANAGER_COMMAND(n,
+                serverReply *r = CLUSTER_MANAGER_COMMAND(n,
                     "CLUSTER GETKEYSINSLOT %d %d", slot, 10);
                 success = clusterManagerCheckRedisReply(n, r, NULL);
                 if (r) {
@@ -6479,7 +6479,7 @@ static int clusterManagerFixOpenSlot(int slot) {
             clusterManagerNode *n = listFirst(migrating)->value;
             clusterManagerLogInfo(">>> Case 4: Closing slot %d on %s:%d\n",
                                   slot, n->ip, n->port);
-            redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER SETSLOT %d %s",
+            serverReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER SETSLOT %d %s",
                                                     slot, "STABLE");
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (r) freeReplyObject(r);
@@ -7086,7 +7086,7 @@ assign_replicas:
         listRewind(cluster_manager.nodes, &li);
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *node = ln->value;
-            redisReply *reply = NULL;
+            serverReply *reply = NULL;
             reply = CLUSTER_MANAGER_COMMAND(node,
                                             "cluster set-config-epoch %d",
                                             config_epoch++);
@@ -7115,7 +7115,7 @@ assign_replicas:
                 }
                 continue;
             }
-            redisReply *reply = NULL;
+            serverReply *reply = NULL;
             if (first->bus_port == 0 || (first->bus_port == first->port + CLUSTER_MANAGER_PORT_INCR)) {
                 /* CLUSTER MEET bus-port parameter was added in 4.0.
                  * So if (bus_port == 0) or (bus_port == port + CLUSTER_MANAGER_PORT_INCR),
@@ -7192,9 +7192,9 @@ cleanup:
 
 static int clusterManagerCommandAddNode(int argc, char **argv) {
     int success = 1;
-    redisReply *reply = NULL;
-    redisReply *function_restore_reply = NULL;
-    redisReply *function_list_reply = NULL;
+    serverReply *reply = NULL;
+    serverReply *function_restore_reply = NULL;
+    serverReply *function_list_reply = NULL;
     char *ref_ip = NULL, *ip = NULL;
     int ref_port = 0, port = 0;
     if (!getClusterHostFromCmdArgs(argc - 1, argv + 1, &ref_ip, &ref_port))
@@ -7390,13 +7390,13 @@ static int clusterManagerCommandDeleteNode(int argc, char **argv) {
             assert(master != NULL);
             clusterManagerLogInfo(">>> %s:%d as replica of %s:%d\n",
                                   n->ip, n->port, master->ip, master->port);
-            redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER REPLICATE %s",
+            serverReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER REPLICATE %s",
                                                     master->name);
             success = clusterManagerCheckRedisReply(n, r, NULL);
             if (r) freeReplyObject(r);
             if (!success) return 0;
         }
-        redisReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER FORGET %s",
+        serverReply *r = CLUSTER_MANAGER_COMMAND(n, "CLUSTER FORGET %s",
                                                 node_id);
         success = clusterManagerCheckRedisReply(n, r, NULL);
         if (r) freeReplyObject(r);
@@ -7406,7 +7406,7 @@ static int clusterManagerCommandDeleteNode(int argc, char **argv) {
     /* Finally send CLUSTER RESET to the node. */
     clusterManagerLogInfo(">>> Sending CLUSTER RESET SOFT to the "
                           "deleted node.\n");
-    redisReply *r = redisCommand(node->context, "CLUSTER RESET %s", "SOFT");
+    serverReply *r = redisCommand(node->context, "CLUSTER RESET %s", "SOFT");
     success = clusterManagerCheckRedisReply(node, r, NULL);
     if (r) freeReplyObject(r);
     return success;
@@ -7852,7 +7852,7 @@ static int clusterManagerCommandSetTimeout(int argc, char **argv) {
     while ((ln = listNext(&li)) != NULL) {
         clusterManagerNode *n = ln->value;
         char *err = NULL;
-        redisReply *reply = CLUSTER_MANAGER_COMMAND(n, "CONFIG %s %s %d",
+        serverReply *reply = CLUSTER_MANAGER_COMMAND(n, "CONFIG %s %s %d",
                                                     "SET",
                                                     "cluster-node-timeout",
                                                     timeout);
@@ -7914,7 +7914,7 @@ static int clusterManagerCommandImport(int argc, char **argv) {
     if (!clusterManagerLoadInfoFromNode(refnode)) return 0;
     if (!clusterManagerCheckCluster(0)) return 0;
     char *reply_err = NULL;
-    redisReply *src_reply = NULL;
+    serverReply *src_reply = NULL;
     // Connect to the source node.
     redisContext *src_ctx = redisConnectWrapper(src_ip, src_port, config.connect_timeout);
     if (src_ctx->err) {
@@ -8006,13 +8006,13 @@ static int clusterManagerCommandImport(int argc, char **argv) {
             cursor = src_reply->element[0]->integer;
         int keycount = src_reply->element[1]->elements;
         for (i = 0; i < keycount; i++) {
-            redisReply *kr = src_reply->element[1]->element[i];
+            serverReply *kr = src_reply->element[1]->element[i];
             assert(kr->type == REDIS_REPLY_STRING);
             char *key = kr->str;
             uint16_t slot = clusterManagerKeyHashSlot(key, kr->len);
             clusterManagerNode *target = slots_map[slot];
             printf("Migrating %s to %s:%d: ", key, target->ip, target->port);
-            redisReply *r = reconnectingRedisCommand(src_ctx, cmdfmt,
+            serverReply *r = reconnectingRedisCommand(src_ctx, cmdfmt,
                                                      target->ip, target->port,
                                                      key, 0, timeout);
             if (!r || r->type == REDIS_REPLY_ERROR) {
@@ -8066,7 +8066,7 @@ static int clusterManagerCommandCall(int argc, char **argv) {
         if ((config.cluster_manager_command.flags & CLUSTER_MANAGER_CMD_FLAG_SLAVES_ONLY)
               && (n->replicate == NULL)) continue;   // continue if node is master
         if (!n->context && !clusterManagerNodeConnect(n)) continue;
-        redisReply *reply = NULL;
+        serverReply *reply = NULL;
         redisAppendCommandArgv(n->context, argc, (const char **) argv, argvlen);
         int status = redisGetReply(n->context, (void **)(&reply));
         if (status != REDIS_OK || reply == NULL )
@@ -8225,7 +8225,7 @@ static void latencyModePrint(long long min, long long max, double avg, long long
 #define LATENCY_SAMPLE_RATE 10 /* milliseconds. */
 #define LATENCY_HISTORY_DEFAULT_INTERVAL 15000 /* milliseconds. */
 static void latencyMode(void) {
-    redisReply *reply;
+    serverReply *reply;
     long long start, latency, min = 0, max = 0, tot = 0, count = 0;
     long long history_interval =
         config.interval ? config.interval/1000 :
@@ -8349,7 +8349,7 @@ void showLatencyDistLegend(void) {
 }
 
 static void latencyDistMode(void) {
-    redisReply *reply;
+    serverReply *reply;
     long long start, latency, count = 0;
     long long history_interval =
         config.interval ? config.interval/1000 :
@@ -8435,7 +8435,7 @@ static void latencyDistMode(void) {
 int sendReplconf(const char* arg1, const char* arg2) {
     int res = 1;
     fprintf(stderr, "sending REPLCONF %s %s\n", arg1, arg2);
-    redisReply *reply = redisCommand(context, "REPLCONF %s %s", arg1, arg2);
+    serverReply *reply = redisCommand(context, "REPLCONF %s %s", arg1, arg2);
 
     /* Handle any error conditions */
     if(reply == NULL) {
@@ -8727,7 +8727,7 @@ static void pipeMode(void) {
     long long errors = 0, replies = 0, obuf_len = 0, obuf_pos = 0;
     char obuf[1024*16]; /* Output buffer */
     char aneterr[ANET_ERR_LEN];
-    redisReply *reply;
+    serverReply *reply;
     int eof = 0; /* True once we consumed all the standard input. */
     int done = 0;
     char magic[20]; /* Special reply we recognize. */
@@ -8881,8 +8881,8 @@ static void pipeMode(void) {
  * Find big keys
  *--------------------------------------------------------------------------- */
 
-static redisReply *sendScan(unsigned long long *it) {
-    redisReply *reply;
+static serverReply *sendScan(unsigned long long *it) {
+    serverReply *reply;
 
     if (config.pattern)
         reply = redisCommand(context, "SCAN %llu MATCH %b COUNT %d",
@@ -8917,7 +8917,7 @@ static redisReply *sendScan(unsigned long long *it) {
 }
 
 static int getDbSize(void) {
-    redisReply *reply;
+    serverReply *reply;
     int size;
 
     reply = redisCommand(context, "DBSIZE");
@@ -8941,7 +8941,7 @@ static int getDbSize(void) {
 }
 
 static int getDatabases(void) {
-    redisReply *reply;
+    serverReply *reply;
     int dbnum;
 
     reply = redisCommand(context, "CONFIG GET databases");
@@ -9007,8 +9007,8 @@ static dictType typeinfoDictType = {
     NULL                       /* allow to expand */
 };
 
-static void getKeyTypes(dict *types_dict, redisReply *keys, typeinfo **types) {
-    redisReply *reply;
+static void getKeyTypes(dict *types_dict, serverReply *keys, typeinfo **types) {
+    serverReply *reply;
     unsigned int i;
 
     /* Pipeline TYPE commands */
@@ -9048,11 +9048,11 @@ static void getKeyTypes(dict *types_dict, redisReply *keys, typeinfo **types) {
     }
 }
 
-static void getKeySizes(redisReply *keys, typeinfo **types,
+static void getKeySizes(serverReply *keys, typeinfo **types,
                         unsigned long long *sizes, int memkeys,
                         unsigned memkeys_samples)
 {
-    redisReply *reply;
+    serverReply *reply;
     unsigned int i;
 
     /* Pipeline size commands */
@@ -9115,7 +9115,7 @@ static void longStatLoopModeStop(int s) {
 /* In cluster mode we may need to send the READONLY command.
    Ignore the error in case the server isn't using cluster mode. */
 static void sendReadOnly(void) {
-    redisReply *read_reply;
+    serverReply *read_reply;
     read_reply = redisCommand(context, "READONLY");
     if (read_reply == NULL){
         fprintf(stderr, "\nI/O error\n");
@@ -9129,7 +9129,7 @@ static void sendReadOnly(void) {
 
 static void findBigKeys(int memkeys, unsigned memkeys_samples) {
     unsigned long long sampled = 0, total_keys, totlen=0, *sizes=NULL, it=0, scan_loops = 0;
-    redisReply *reply, *keys;
+    serverReply *reply, *keys;
     unsigned int arrsize=0, i;
     dictIterator *di;
     dictEntry *de;
@@ -9267,8 +9267,8 @@ static void findBigKeys(int memkeys, unsigned memkeys_samples) {
     exit(0);
 }
 
-static void getKeyFreqs(redisReply *keys, unsigned long long *freqs) {
-    redisReply *reply;
+static void getKeyFreqs(serverReply *keys, unsigned long long *freqs) {
+    serverReply *reply;
     unsigned int i;
 
     /* Pipeline OBJECT freq commands */
@@ -9305,7 +9305,7 @@ static void getKeyFreqs(redisReply *keys, unsigned long long *freqs) {
 
 #define HOTKEYS_SAMPLE 16
 static void findHotKeys(void) {
-    redisReply *keys, *reply;
+    serverReply *keys, *reply;
     unsigned long long counters[HOTKEYS_SAMPLE] = {0};
     sds hotkeys[HOTKEYS_SAMPLE] = {NULL};
     unsigned long long sampled = 0, total_keys, *freqs = NULL, it = 0, scan_loops = 0;
@@ -9463,7 +9463,7 @@ void bytesToHuman(char *s, size_t size, long long n) {
 }
 
 static void statMode(void) {
-    redisReply *reply;
+    serverReply *reply;
     long aux, requests = 0;
     int dbnum = getDatabases();
     int i = 0;
@@ -9557,7 +9557,7 @@ static void statMode(void) {
  *--------------------------------------------------------------------------- */
 
 static void scanMode(void) {
-    redisReply *reply;
+    serverReply *reply;
     unsigned long long cur = 0;
     signal(SIGINT, longStatLoopModeStop);
     do {
@@ -9610,7 +9610,7 @@ void LRUTestGenKey(char *buf, size_t buflen) {
 #define LRU_CYCLE_PERIOD 1000 /* 1000 milliseconds. */
 #define LRU_CYCLE_PIPELINE_SIZE 250
 static void LRUTestMode(void) {
-    redisReply *reply;
+    serverReply *reply;
     char key[128];
     long long start_cycle;
     int j;

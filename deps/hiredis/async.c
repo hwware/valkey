@@ -304,7 +304,7 @@ static int __redisShiftCallback(redisCallbackList *list, redisCallback *target) 
     return REDIS_ERR;
 }
 
-static void __redisRunCallback(redisAsyncContext *ac, redisCallback *cb, redisReply *reply) {
+static void __redisRunCallback(redisAsyncContext *ac, redisCallback *cb, serverReply *reply) {
     redisContext *c = &(ac->c);
     if (cb->fn != NULL) {
         c->flags |= REDIS_IN_CALLBACK;
@@ -313,7 +313,7 @@ static void __redisRunCallback(redisAsyncContext *ac, redisCallback *cb, redisRe
     }
 }
 
-static void __redisRunPushCallback(redisAsyncContext *ac, redisReply *reply) {
+static void __redisRunPushCallback(redisAsyncContext *ac, serverReply *reply) {
     if (ac->push_cb != NULL) {
         ac->c.flags |= REDIS_IN_CALLBACK;
         ac->push_cb(ac, reply);
@@ -467,7 +467,7 @@ void redisAsyncDisconnect(redisAsyncContext *ac) {
         __redisAsyncDisconnect(ac);
 }
 
-static int __redisGetSubscribeCallback(redisAsyncContext *ac, redisReply *reply, redisCallback *dstcb) {
+static int __redisGetSubscribeCallback(redisAsyncContext *ac, serverReply *reply, redisCallback *dstcb) {
     redisContext *c = &(ac->c);
     dict *callbacks;
     redisCallback *cb = NULL;
@@ -546,7 +546,7 @@ oom:
 #define redisIsSpontaneousPushReply(r) \
     (redisIsPushReply(r) && !redisIsSubscribeReply(r))
 
-static int redisIsSubscribeReply(redisReply *reply) {
+static int redisIsSubscribeReply(serverReply *reply) {
     char *str;
     size_t len, off;
 
@@ -618,9 +618,9 @@ void redisProcessCallbacks(redisAsyncContext *ac) {
              * In this case we also want to close the connection, and have the
              * user wait until the server is ready to take our request.
              */
-            if (((redisReply*)reply)->type == REDIS_REPLY_ERROR) {
+            if (((serverReply*)reply)->type == REDIS_REPLY_ERROR) {
                 c->err = REDIS_ERR_OTHER;
-                snprintf(c->errstr,sizeof(c->errstr),"%s",((redisReply*)reply)->str);
+                snprintf(c->errstr,sizeof(c->errstr),"%s",((serverReply*)reply)->str);
                 c->reader->fn->freeObject(reply);
                 __redisAsyncDisconnect(ac);
                 return;

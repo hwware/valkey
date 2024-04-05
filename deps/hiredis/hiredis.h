@@ -108,7 +108,7 @@ struct redisAsyncContext;
 struct redisContext;
 
 /* RESP3 push helpers and callback prototypes */
-#define redisIsPushReply(r) (((redisReply*)(r))->type == REDIS_REPLY_PUSH)
+#define redisIsPushReply(r) (((serverReply*)(r))->type == REDIS_REPLY_PUSH)
 typedef void (redisPushFn)(void *, void *);
 typedef void (redisAsyncPushFn)(struct redisAsyncContext *, void *);
 
@@ -117,7 +117,7 @@ extern "C" {
 #endif
 
 /* This is the reply object returned by redisCommand() */
-typedef struct redisReply {
+typedef struct serverReply {
     int type; /* REDIS_REPLY_* */
     long long integer; /* The integer when type is REDIS_REPLY_INTEGER */
     double dval; /* The double when type is REDIS_REPLY_DOUBLE */
@@ -128,8 +128,8 @@ typedef struct redisReply {
     char vtype[4]; /* Used for REDIS_REPLY_VERB, contains the null
                       terminated 3 character content type, such as "txt". */
     size_t elements; /* number of elements, for REDIS_REPLY_ARRAY */
-    struct redisReply **element; /* elements vector for REDIS_REPLY_ARRAY */
-} redisReply;
+    struct serverReply **element; /* elements vector for REDIS_REPLY_ARRAY */
+} serverReply;
 
 redisReader *redisReaderCreate(void);
 

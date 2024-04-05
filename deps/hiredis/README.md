@@ -57,7 +57,7 @@ Bulk and multi-bulk lengths less than -1 or greater than `LLONG_MAX` are now
 protocol errors. This is consistent with the RESP specification. On 32-bit
 platforms, the upper bound is lowered to `SIZE_MAX`.
 
-Change `redisReply.len` to `size_t`, as it denotes the the size of a string
+Change `serverReply.len` to `size_t`, as it denotes the the size of a string
 
 User code should compare this to `size_t` values as well.  If it was used to
 compare to other values, casting might be necessary or can be removed, if
@@ -206,8 +206,8 @@ the `err` field in the context will be set (see section on **Errors**).
 Once an error is returned the context cannot be reused and you should set up
 a new connection.
 
-The standard replies that `redisCommand` are of the type `redisReply`. The
-`type` field in the `redisReply` should be used to test what kind of reply
+The standard replies that `redisCommand` are of the type `serverReply`. The
+`type` field in the `serverReply` should be used to test what kind of reply
 was received:
 
 ### RESP2
@@ -232,7 +232,7 @@ was received:
 
 * **`REDIS_REPLY_ARRAY`**:
     * A multi bulk reply. The number of elements in the multi bulk reply is stored in
-      `reply->elements`. Every element in the multi bulk reply is a `redisReply` object as well
+      `reply->elements`. Every element in the multi bulk reply is a `serverReply` object as well
       and can be accessed via `reply->element[..index..]`.
       Redis may reply with nested arrays but this is fully supported.
 
@@ -266,7 +266,7 @@ Hiredis also supports every new `RESP3` data type which are as follows.  For mor
 
 * **`REDIS_REPLY_BIGNUM`**:
     * A string representing an arbitrarily large signed or unsigned integer value.
-      The number will be encoded as a string in the `str` member of `redisReply`.
+      The number will be encoded as a string in the `str` member of `serverReply`.
 
 * **`REDIS_REPLY_VERB`**:
     * A verbatim string, intended to be presented to the user without modification.
@@ -339,7 +339,7 @@ the `err` field in the context can be used to find out what the cause of this er
 The following examples shows a simple pipeline (resulting in only a single call to `write(2)` and
 a single call to `read(2)`):
 ```c
-redisReply *reply;
+serverReply *reply;
 redisAppendCommand(context,"SET foo bar");
 redisAppendCommand(context,"GET foo");
 redisGetReply(context,(void**)&reply); // reply for SET
@@ -583,11 +583,11 @@ multi bulk nesting level is higher than this, the parser returns an error.
 
 ### Customizing replies
 
-The function `redisReaderGetReply` creates `redisReply` and makes the function
-argument `reply` point to the created `redisReply` variable. For instance, if
-the response of type `REDIS_REPLY_STATUS` then the `str` field of `redisReply`
+The function `redisReaderGetReply` creates `serverReply` and makes the function
+argument `reply` point to the created `serverReply` variable. For instance, if
+the response of type `REDIS_REPLY_STATUS` then the `str` field of `serverReply`
 will hold the status as a vanilla C string. However, the functions that are
-responsible for creating instances of the `redisReply` can be customized by
+responsible for creating instances of the `serverReply` can be customized by
 setting the `fn` field on the `redisReader` struct. This should be done
 immediately after creating the `redisReader`.
 

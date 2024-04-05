@@ -10,7 +10,7 @@
 static void example_argv_command(redisContext *c, size_t n) {
     char **argv, tmp[42];
     size_t *argvlen;
-    redisReply *reply;
+    serverReply *reply;
 
     /* We're allocating two additional elements for command and key */
     argv = malloc(sizeof(*argv) * (2 + n));
@@ -58,7 +58,7 @@ static void example_argv_command(redisContext *c, size_t n) {
 int main(int argc, char **argv) {
     unsigned int j, isunix = 0;
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     const char *hostname = (argc > 1) ? argv[1] : "127.0.0.1";
 
     if (argc > 2) {

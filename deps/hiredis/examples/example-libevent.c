@@ -8,7 +8,7 @@
 #include <adapters/libevent.h>
 
 void getCallback(redisAsyncContext *c, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     if (reply == NULL) {
         if (c->errstr) {
             printf("errstr: %s\n", c->errstr);

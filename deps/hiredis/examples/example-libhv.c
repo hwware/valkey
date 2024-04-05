@@ -8,7 +8,7 @@
 #include <adapters/libhv.h>
 
 void getCallback(redisAsyncContext *c, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     if (reply == NULL) return;
     printf("argv[%s]: %s\n", (char*)privdata, reply->str);
 
@@ -18,7 +18,7 @@ void getCallback(redisAsyncContext *c, void *r, void *privdata) {
 
 void debugCallback(redisAsyncContext *c, void *r, void *privdata) {
     (void)privdata;
-    redisReply *reply = r;
+    serverReply *reply = r;
 
     if (reply == NULL) {
         printf("`DEBUG SLEEP` error: %s\n", c->errstr ? c->errstr : "unknown error");

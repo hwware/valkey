@@ -35,7 +35,7 @@ command_cb(redisAsyncContext *ac,
            gpointer r,
            gpointer user_data G_GNUC_UNUSED)
 {
-    redisReply *reply = r;
+    serverReply *reply = r;
 
     if (reply) {
         g_print("REPLY: %s\n", reply->str);

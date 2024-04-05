@@ -239,7 +239,7 @@ static redisContext *getRedisContext(const char *ip, int port,
                                      const char *hostsocket)
 {
     redisContext *ctx = NULL;
-    redisReply *reply =  NULL;
+    serverReply *reply =  NULL;
     if (hostsocket == NULL)
         ctx = redisConnect(ip, port);
     else
@@ -298,7 +298,7 @@ static serverConfig *getServerConfig(const char *ip, int port,
     serverConfig *cfg = zcalloc(sizeof(*cfg));
     if (!cfg) return NULL;
     redisContext *c = NULL;
-    redisReply *reply = NULL, *sub_reply = NULL;
+    serverReply *reply = NULL, *sub_reply = NULL;
     c = getRedisContext(ip, port, hostsocket);
     if (c == NULL) {
         freeServerConfig(cfg);
@@ -312,7 +312,7 @@ static serverConfig *getServerConfig(const char *ip, int port,
     for (; i < 2; i++) {
         int res = redisGetReply(c, &r);
         if (reply) freeReplyObject(reply);
-        reply = res == REDIS_OK ? ((redisReply *) r) : NULL;
+        reply = res == REDIS_OK ? ((serverReply *) r) : NULL;
         if (res != REDIS_OK || !r) goto fail;
         if (reply->type == REDIS_REPLY_ERROR) {
             goto fail;
@@ -484,7 +484,7 @@ static void readHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
                     fprintf(stderr,"Unexpected error reply, exiting...\n");
                     exit(1);
                 }
-                redisReply *r = reply;
+                serverReply *r = reply;
                 if (r->type == REDIS_REPLY_ERROR) {
                     /* Try to update slots configuration if reply error is
                     * MOVED/ASK/CLUSTERDOWN and the key(s) used by the command
@@ -1101,7 +1101,7 @@ static clusterNode **addClusterNode(clusterNode *node) {
 static int fetchClusterConfiguration(void) {
     int success = 1;
     redisContext *ctx = NULL;
-    redisReply *reply =  NULL;
+    serverReply *reply =  NULL;
     ctx = getRedisContext(config.conn_info.hostip, config.conn_info.hostport, config.hostsocket);
     if (ctx == NULL) {
         exit(1);
@@ -1275,7 +1275,7 @@ static int fetchClusterSlotsConfiguration(client c) {
         c->slots_last_update = last_update;
         return -1;
     }
-    redisReply *reply = NULL;
+    serverReply *reply = NULL;
     atomicGetIncr(config.is_fetching_slots, is_fetching_slots, 1);
     if (is_fetching_slots) return -1; //TODO: use other codes || errno ?
     atomicSet(config.is_fetching_slots, 1);
@@ -1322,13 +1322,13 @@ static int fetchClusterSlotsConfiguration(client c) {
     }
     assert(reply->type == REDIS_REPLY_ARRAY);
     for (i = 0; i < reply->elements; i++) {
-        redisReply *r = reply->element[i];
+        serverReply *r = reply->element[i];
         assert(r->type == REDIS_REPLY_ARRAY);
         assert(r->elements >= 3);
         int from, to, slot;
         from = r->element[0]->integer;
         to = r->element[1]->integer;
-        redisReply *nr =  r->element[2];
+        serverReply *nr =  r->element[2];
         assert(nr->type == REDIS_REPLY_ARRAY && nr->elements >= 3);
         assert(nr->element[2]->str != NULL);
         sds name =  sdsnew(nr->element[2]->str);

@@ -8,7 +8,7 @@ using namespace std;
 
 void getCallback(redisAsyncContext *, void * r, void * privdata) {
 
-    redisReply * reply = static_cast<redisReply *>(r);
+    serverReply * reply = static_cast<serverReply *>(r);
     ExampleQt * ex = static_cast<ExampleQt *>(privdata);
     if (reply == nullptr || ex == nullptr) return;
 

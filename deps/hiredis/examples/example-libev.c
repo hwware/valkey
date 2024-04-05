@@ -8,7 +8,7 @@
 #include <adapters/libev.h>
 
 void getCallback(redisAsyncContext *c, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     if (reply == NULL) return;
     printf("argv[%s]: %s\n", (char*)privdata, reply->str);
 

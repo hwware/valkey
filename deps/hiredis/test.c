@@ -107,7 +107,7 @@ static long long usec(void) {
 /* Helper to extract Redis version information.  Aborts on any failure. */
 #define REDIS_VERSION_FIELD "redis_version:"
 void get_redis_version(redisContext *c, int *majorptr, int *minorptr) {
-    redisReply *reply;
+    serverReply *reply;
     char *eptr, *s, *e;
     int major, minor;
 
@@ -142,7 +142,7 @@ abort:
 }
 
 static redisContext *select_database(redisContext *c) {
-    redisReply *reply;
+    serverReply *reply;
 
     /* Switch to DB 9 for testing, now that we know we can chat. */
     reply = redisCommand(c,"SELECT 9");
@@ -165,7 +165,7 @@ static redisContext *select_database(redisContext *c) {
 
 /* Switch protocol */
 static void send_hello(redisContext *c, int version) {
-    redisReply *reply;
+    serverReply *reply;
     int expected;
 
     reply = redisCommand(c, "HELLO %d", version);
@@ -176,7 +176,7 @@ static void send_hello(redisContext *c, int version) {
 
 /* Togggle client tracking */
 static void send_client_tracking(redisContext *c, const char *str) {
-    redisReply *reply;
+    serverReply *reply;
 
     reply = redisCommand(c, "CLIENT TRACKING %s", str);
     assert(reply != NULL && reply->type == REDIS_REPLY_STATUS);
@@ -184,7 +184,7 @@ static void send_client_tracking(redisContext *c, const char *str) {
 }
 
 static int disconnect(redisContext *c, int keep_fd) {
-    redisReply *reply;
+    serverReply *reply;
 
     /* Make sure we're on DB 9. */
     reply = redisCommand(c,"SELECT 9");
@@ -385,7 +385,7 @@ static void test_format_commands(void) {
 
 static void test_append_formatted_commands(struct config config) {
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     char *cmd;
     int len;
 
@@ -459,16 +459,16 @@ static void test_reply_reader(void) {
     ret = redisReaderGetReply(reader,&reply);
     root = reply; /* Keep track of the root reply */
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_ARRAY &&
-        ((redisReply*)reply)->elements == 1);
+        ((serverReply*)reply)->type == REDIS_REPLY_ARRAY &&
+        ((serverReply*)reply)->elements == 1);
 
     test("Can parse arbitrarily nested multi-bulks correctly: ");
     while(i--) {
-        assert(reply != NULL && ((redisReply*)reply)->type == REDIS_REPLY_ARRAY);
-        reply = ((redisReply*)reply)->element[0];
+        assert(reply != NULL && ((serverReply*)reply)->type == REDIS_REPLY_ARRAY);
+        reply = ((serverReply*)reply)->element[0];
     }
-    test_cond(((redisReply*)reply)->type == REDIS_REPLY_STRING &&
-        !memcmp(((redisReply*)reply)->str, "LOLWUT", 6));
+    test_cond(((serverReply*)reply)->type == REDIS_REPLY_STRING &&
+        !memcmp(((serverReply*)reply)->str, "LOLWUT", 6));
     freeReplyObject(root);
     redisReaderFree(reader);
 
@@ -477,8 +477,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ":9223372036854775807\r\n",22);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-            ((redisReply*)reply)->type == REDIS_REPLY_INTEGER &&
-            ((redisReply*)reply)->integer == LLONG_MAX);
+            ((serverReply*)reply)->type == REDIS_REPLY_INTEGER &&
+            ((serverReply*)reply)->integer == LLONG_MAX);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -496,8 +496,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ":-9223372036854775808\r\n",23);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-            ((redisReply*)reply)->type == REDIS_REPLY_INTEGER &&
-            ((redisReply*)reply)->integer == LLONG_MIN);
+            ((serverReply*)reply)->type == REDIS_REPLY_INTEGER &&
+            ((serverReply*)reply)->integer == LLONG_MIN);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -609,8 +609,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader,(char*)"3\r\nval\r\n", 8);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_ARRAY &&
-        ((redisReply*)reply)->elements == 3);
+        ((serverReply*)reply)->type == REDIS_REPLY_ARRAY &&
+        ((serverReply*)reply)->elements == 3);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -620,8 +620,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader,(char*)"*0\r\n",4);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_ARRAY &&
-        ((redisReply*)reply)->elements == 0);
+        ((serverReply*)reply)->type == REDIS_REPLY_ARRAY &&
+        ((serverReply*)reply)->elements == 0);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -631,8 +631,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader,(char*)"=10\r\ntxt:LOLWUT\r\n",17);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_VERB &&
-         !memcmp(((redisReply*)reply)->str,"LOLWUT", 6));
+        ((serverReply*)reply)->type == REDIS_REPLY_VERB &&
+         !memcmp(((serverReply*)reply)->str,"LOLWUT", 6));
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -642,12 +642,12 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader,(char*)">2\r\n$6\r\nLOLWUT\r\n:42\r\n",21);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_PUSH &&
-        ((redisReply*)reply)->elements == 2 &&
-        ((redisReply*)reply)->element[0]->type == REDIS_REPLY_STRING &&
-        !memcmp(((redisReply*)reply)->element[0]->str,"LOLWUT",6) &&
-        ((redisReply*)reply)->element[1]->type == REDIS_REPLY_INTEGER &&
-        ((redisReply*)reply)->element[1]->integer == 42);
+        ((serverReply*)reply)->type == REDIS_REPLY_PUSH &&
+        ((serverReply*)reply)->elements == 2 &&
+        ((serverReply*)reply)->element[0]->type == REDIS_REPLY_STRING &&
+        !memcmp(((serverReply*)reply)->element[0]->str,"LOLWUT",6) &&
+        ((serverReply*)reply)->element[1]->type == REDIS_REPLY_INTEGER &&
+        ((serverReply*)reply)->element[1]->integer == 42);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -656,10 +656,10 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ",3.14159265358979323846\r\n",25);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_DOUBLE &&
-              fabs(((redisReply*)reply)->dval - 3.14159265358979323846) < 0.00000001 &&
-              ((redisReply*)reply)->len == 22 &&
-              strcmp(((redisReply*)reply)->str, "3.14159265358979323846") == 0);
+              ((serverReply*)reply)->type == REDIS_REPLY_DOUBLE &&
+              fabs(((serverReply*)reply)->dval - 3.14159265358979323846) < 0.00000001 &&
+              ((serverReply*)reply)->len == 22 &&
+              strcmp(((serverReply*)reply)->str, "3.14159265358979323846") == 0);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -677,9 +677,9 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ",inf\r\n",6);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_DOUBLE &&
-              isinf(((redisReply*)reply)->dval) &&
-              ((redisReply*)reply)->dval > 0);
+              ((serverReply*)reply)->type == REDIS_REPLY_DOUBLE &&
+              isinf(((serverReply*)reply)->dval) &&
+              ((serverReply*)reply)->dval > 0);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -688,8 +688,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ",nan\r\n",6);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_DOUBLE &&
-              isnan(((redisReply*)reply)->dval));
+              ((serverReply*)reply)->type == REDIS_REPLY_DOUBLE &&
+              isnan(((serverReply*)reply)->dval));
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -698,8 +698,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, ",-nan\r\n", 7);
     ret = redisReaderGetReply(reader, &reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_DOUBLE &&
-              isnan(((redisReply*)reply)->dval));
+              ((serverReply*)reply)->type == REDIS_REPLY_DOUBLE &&
+              isnan(((serverReply*)reply)->dval));
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -708,7 +708,7 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "_\r\n",3);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_NIL);
+              ((serverReply*)reply)->type == REDIS_REPLY_NIL);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -726,8 +726,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "#t\r\n",4);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_BOOL &&
-              ((redisReply*)reply)->integer);
+              ((serverReply*)reply)->type == REDIS_REPLY_BOOL &&
+              ((serverReply*)reply)->integer);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -736,8 +736,8 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "#f\r\n",4);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-              ((redisReply*)reply)->type == REDIS_REPLY_BOOL &&
-              !((redisReply*)reply)->integer);
+              ((serverReply*)reply)->type == REDIS_REPLY_BOOL &&
+              !((serverReply*)reply)->integer);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -755,18 +755,18 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "%2\r\n+first\r\n:123\r\n$6\r\nsecond\r\n#t\r\n",34);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_MAP &&
-        ((redisReply*)reply)->elements == 4 &&
-        ((redisReply*)reply)->element[0]->type == REDIS_REPLY_STATUS &&
-        ((redisReply*)reply)->element[0]->len == 5 &&
-        !strcmp(((redisReply*)reply)->element[0]->str,"first") &&
-        ((redisReply*)reply)->element[1]->type == REDIS_REPLY_INTEGER &&
-        ((redisReply*)reply)->element[1]->integer == 123 &&
-        ((redisReply*)reply)->element[2]->type == REDIS_REPLY_STRING &&
-        ((redisReply*)reply)->element[2]->len == 6 &&
-        !strcmp(((redisReply*)reply)->element[2]->str,"second") &&
-        ((redisReply*)reply)->element[3]->type == REDIS_REPLY_BOOL &&
-        ((redisReply*)reply)->element[3]->integer);
+        ((serverReply*)reply)->type == REDIS_REPLY_MAP &&
+        ((serverReply*)reply)->elements == 4 &&
+        ((serverReply*)reply)->element[0]->type == REDIS_REPLY_STATUS &&
+        ((serverReply*)reply)->element[0]->len == 5 &&
+        !strcmp(((serverReply*)reply)->element[0]->str,"first") &&
+        ((serverReply*)reply)->element[1]->type == REDIS_REPLY_INTEGER &&
+        ((serverReply*)reply)->element[1]->integer == 123 &&
+        ((serverReply*)reply)->element[2]->type == REDIS_REPLY_STRING &&
+        ((serverReply*)reply)->element[2]->len == 6 &&
+        !strcmp(((serverReply*)reply)->element[2]->str,"second") &&
+        ((serverReply*)reply)->element[3]->type == REDIS_REPLY_BOOL &&
+        ((serverReply*)reply)->element[3]->integer);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -775,20 +775,20 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "~5\r\n+orange\r\n$5\r\napple\r\n#f\r\n:100\r\n:999\r\n",40);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_SET &&
-        ((redisReply*)reply)->elements == 5 &&
-        ((redisReply*)reply)->element[0]->type == REDIS_REPLY_STATUS &&
-        ((redisReply*)reply)->element[0]->len == 6 &&
-        !strcmp(((redisReply*)reply)->element[0]->str,"orange") &&
-        ((redisReply*)reply)->element[1]->type == REDIS_REPLY_STRING &&
-        ((redisReply*)reply)->element[1]->len == 5 &&
-        !strcmp(((redisReply*)reply)->element[1]->str,"apple") &&
-        ((redisReply*)reply)->element[2]->type == REDIS_REPLY_BOOL &&
-        !((redisReply*)reply)->element[2]->integer &&
-        ((redisReply*)reply)->element[3]->type == REDIS_REPLY_INTEGER &&
-        ((redisReply*)reply)->element[3]->integer == 100 &&
-        ((redisReply*)reply)->element[4]->type == REDIS_REPLY_INTEGER &&
-        ((redisReply*)reply)->element[4]->integer == 999);
+        ((serverReply*)reply)->type == REDIS_REPLY_SET &&
+        ((serverReply*)reply)->elements == 5 &&
+        ((serverReply*)reply)->element[0]->type == REDIS_REPLY_STATUS &&
+        ((serverReply*)reply)->element[0]->len == 6 &&
+        !strcmp(((serverReply*)reply)->element[0]->str,"orange") &&
+        ((serverReply*)reply)->element[1]->type == REDIS_REPLY_STRING &&
+        ((serverReply*)reply)->element[1]->len == 5 &&
+        !strcmp(((serverReply*)reply)->element[1]->str,"apple") &&
+        ((serverReply*)reply)->element[2]->type == REDIS_REPLY_BOOL &&
+        !((serverReply*)reply)->element[2]->integer &&
+        ((serverReply*)reply)->element[3]->type == REDIS_REPLY_INTEGER &&
+        ((serverReply*)reply)->element[3]->integer == 100 &&
+        ((serverReply*)reply)->element[4]->type == REDIS_REPLY_INTEGER &&
+        ((serverReply*)reply)->element[4]->integer == 999);
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -797,9 +797,9 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader,"(3492890328409238509324850943850943825024385\r\n",46);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_BIGNUM &&
-        ((redisReply*)reply)->len == 43 &&
-        !strcmp(((redisReply*)reply)->str,"3492890328409238509324850943850943825024385"));
+        ((serverReply*)reply)->type == REDIS_REPLY_BIGNUM &&
+        ((serverReply*)reply)->len == 43 &&
+        !strcmp(((serverReply*)reply)->str,"3492890328409238509324850943850943825024385"));
     freeReplyObject(reply);
     redisReaderFree(reader);
 
@@ -808,12 +808,12 @@ static void test_reply_reader(void) {
     redisReaderFeed(reader, "*1\r\n,3.14159265358979323846\r\n",31);
     ret = redisReaderGetReply(reader,&reply);
     test_cond(ret == REDIS_OK &&
-        ((redisReply*)reply)->type == REDIS_REPLY_ARRAY &&
-        ((redisReply*)reply)->elements == 1 &&
-        ((redisReply*)reply)->element[0]->type == REDIS_REPLY_DOUBLE &&
-        fabs(((redisReply*)reply)->element[0]->dval - 3.14159265358979323846) < 0.00000001 &&
-        ((redisReply*)reply)->element[0]->len == 22 &&
-        strcmp(((redisReply*)reply)->element[0]->str, "3.14159265358979323846") == 0);
+        ((serverReply*)reply)->type == REDIS_REPLY_ARRAY &&
+        ((serverReply*)reply)->elements == 1 &&
+        ((serverReply*)reply)->element[0]->type == REDIS_REPLY_DOUBLE &&
+        fabs(((serverReply*)reply)->element[0]->dval - 3.14159265358979323846) < 0.00000001 &&
+        ((serverReply*)reply)->element[0]->len == 22 &&
+        strcmp(((serverReply*)reply)->element[0]->str, "3.14159265358979323846") == 0);
     freeReplyObject(reply);
     redisReaderFree(reader);
 }
@@ -949,7 +949,7 @@ static void test_blocking_connection_errors(void) {
 /* Test push handler */
 void push_handler(void *privdata, void *r) {
     struct pushCounters *pcounts = privdata;
-    redisReply *reply = r, *payload;
+    serverReply *reply = r, *payload;
 
     assert(reply && reply->type == REDIS_REPLY_PUSH && reply->elements == 2);
 
@@ -976,7 +976,7 @@ void push_handler_async(redisAsyncContext *ac, void *reply) {
 static void test_resp3_push_handler(redisContext *c) {
     struct pushCounters pc = {0};
     redisPushFn *old = NULL;
-    redisReply *reply;
+    serverReply *reply;
     void *privdata;
 
     /* Switch to RESP3 and turn on client tracking */
@@ -1115,7 +1115,7 @@ static void test_privdata_hooks(struct config config) {
 
 static void test_blocking_connection(struct config config) {
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     int major;
 
     c = do_connect(config);
@@ -1213,7 +1213,7 @@ static void test_blocking_connection(struct config config) {
 /* Send DEBUG SLEEP 0 to detect if we have this command */
 static int detect_debug_sleep(redisContext *c) {
     int detected;
-    redisReply *reply = redisCommand(c, "DEBUG SLEEP 0\r\n");
+    serverReply *reply = redisCommand(c, "DEBUG SLEEP 0\r\n");
 
     if (reply == NULL || c->err) {
         const char *cause = c->err ? c->errstr : "(none)";
@@ -1229,7 +1229,7 @@ static int detect_debug_sleep(redisContext *c) {
 
 static void test_blocking_connection_timeouts(struct config config) {
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     ssize_t s;
     const char *sleep_cmd = "DEBUG SLEEP 3\r\n";
     struct timeval tv;
@@ -1295,7 +1295,7 @@ static void test_blocking_connection_timeouts(struct config config) {
 
 static void test_blocking_io_errors(struct config config) {
     redisContext *c;
-    redisReply *reply;
+    serverReply *reply;
     void *_reply;
     int major, minor;
 
@@ -1389,7 +1389,7 @@ void *hi_malloc_safe(size_t size) {
 
 static void test_throughput(struct config config) {
     redisContext *c = do_connect(config);
-    redisReply **replies;
+    serverReply **replies;
     int i, num;
     long long t1, t2;
 
@@ -1398,7 +1398,7 @@ static void test_throughput(struct config config) {
         freeReplyObject(redisCommand(c,"LPUSH mylist foo"));
 
     num = 1000;
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     t1 = usec();
     for (i = 0; i < num; i++) {
         replies[i] = redisCommand(c,"PING");
@@ -1409,7 +1409,7 @@ static void test_throughput(struct config config) {
     hi_free(replies);
     printf("\t(%dx PING: %.3fs)\n", num, (t2-t1)/1000000.0);
 
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     t1 = usec();
     for (i = 0; i < num; i++) {
         replies[i] = redisCommand(c,"LRANGE mylist 0 499");
@@ -1421,7 +1421,7 @@ static void test_throughput(struct config config) {
     hi_free(replies);
     printf("\t(%dx LRANGE with 500 elements: %.3fs)\n", num, (t2-t1)/1000000.0);
 
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     t1 = usec();
     for (i = 0; i < num; i++) {
         replies[i] = redisCommand(c, "INCRBY incrkey %d", 1000000);
@@ -1433,7 +1433,7 @@ static void test_throughput(struct config config) {
     printf("\t(%dx INCRBY: %.3fs)\n", num, (t2-t1)/1000000.0);
 
     num = 10000;
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     for (i = 0; i < num; i++)
         redisAppendCommand(c,"PING");
     t1 = usec();
@@ -1446,7 +1446,7 @@ static void test_throughput(struct config config) {
     hi_free(replies);
     printf("\t(%dx PING (pipelined): %.3fs)\n", num, (t2-t1)/1000000.0);
 
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     for (i = 0; i < num; i++)
         redisAppendCommand(c,"LRANGE mylist 0 499");
     t1 = usec();
@@ -1460,7 +1460,7 @@ static void test_throughput(struct config config) {
     hi_free(replies);
     printf("\t(%dx LRANGE with 500 elements (pipelined): %.3fs)\n", num, (t2-t1)/1000000.0);
 
-    replies = hi_malloc_safe(sizeof(redisReply*)*num);
+    replies = hi_malloc_safe(sizeof(serverReply*)*num);
     for (i = 0; i < num; i++)
         redisAppendCommand(c,"INCRBY incrkey %d", 1000000);
     t1 = usec();
@@ -1484,7 +1484,7 @@ static void test_throughput(struct config config) {
 //     __test_callback_flags |= (long)privdata;
 // }
 //
-// static void __test_reply_callback(redisContext *c, redisReply *reply, void *privdata) {
+// static void __test_reply_callback(redisContext *c, serverReply *reply, void *privdata) {
 //     ((void)c);
 //     /* Shift to detect execution order */
 //     __test_callback_flags <<= 8;
@@ -1612,7 +1612,7 @@ void unexpected_cb(redisAsyncContext *ac, void *r, void *privdata) {
 void publish_msg(redisOptions *options, const char* channel, const char* msg) {
     redisContext *c = redisConnectWithOptions(options);
     assert(c != NULL);
-    redisReply *reply = redisCommand(c,"PUBLISH %s %s",channel,msg);
+    serverReply *reply = redisCommand(c,"PUBLISH %s %s",channel,msg);
     assert(reply->type == REDIS_REPLY_INTEGER && reply->integer == 1);
     freeReplyObject(reply);
     disconnect(c, 0);
@@ -1620,7 +1620,7 @@ void publish_msg(redisOptions *options, const char* channel, const char* msg) {
 
 /* Expect a reply of type INTEGER */
 void integer_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
     assert(reply != NULL && reply->type == REDIS_REPLY_INTEGER);
     state->checkpoint++;
@@ -1631,7 +1631,7 @@ void integer_cb(redisAsyncContext *ac, void *r, void *privdata) {
  * - a published message triggers an unsubscribe
  * - a command is sent before the unsubscribe response is received. */
 void subscribe_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
 
     assert(reply != NULL &&
@@ -1667,7 +1667,7 @@ void subscribe_cb(redisAsyncContext *ac, void *r, void *privdata) {
 
 /* Expect a reply of type ARRAY */
 void array_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
     assert(reply != NULL && reply->type == REDIS_REPLY_ARRAY);
     state->checkpoint++;
@@ -1770,7 +1770,7 @@ static void test_pubsub_handling_resp3(struct config config) {
  * - the published message triggers a command that times out
  * - the command timeout triggers a disconnect */
 void subscribe_with_timeout_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
 
     /* The non-clean disconnect should trigger the
@@ -1845,7 +1845,7 @@ static void test_command_timeout_during_pubsub(struct config config) {
 
 /* Subscribe callback for test_pubsub_multiple_channels */
 void subscribe_channel_a_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
 
     assert(reply != NULL && reply->type == REDIS_REPLY_ARRAY &&
@@ -1882,7 +1882,7 @@ void subscribe_channel_a_cb(redisAsyncContext *ac, void *r, void *privdata) {
 
 /* Subscribe callback for test_pubsub_multiple_channels */
 void subscribe_channel_b_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
     (void)ac;
 
@@ -1944,7 +1944,7 @@ static void test_pubsub_multiple_channels(struct config config) {
 
 /* Command callback for test_monitor() */
 void monitor_cb(redisAsyncContext *ac, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     TestState *state = privdata;
 
     /* NULL reply is received when BYE triggers a disconnect. */
@@ -1960,7 +1960,7 @@ void monitor_cb(redisAsyncContext *ac, void *r, void *privdata) {
         /* Response from MONITOR */
         redisContext *c = redisConnectWithOptions(state->options);
         assert(c != NULL);
-        redisReply *reply = redisCommand(c,"SET first 1");
+        serverReply *reply = redisCommand(c,"SET first 1");
         assert(reply->type == REDIS_REPLY_STATUS);
         freeReplyObject(reply);
         redisFree(c);
@@ -1969,7 +1969,7 @@ void monitor_cb(redisAsyncContext *ac, void *r, void *privdata) {
         assert(strstr(reply->str,"first") != NULL);
         redisContext *c = redisConnectWithOptions(state->options);
         assert(c != NULL);
-        redisReply *reply = redisCommand(c,"SET second 2");
+        serverReply *reply = redisCommand(c,"SET second 2");
         assert(reply->type == REDIS_REPLY_STATUS);
         freeReplyObject(reply);
         redisFree(c);
@@ -2088,7 +2088,7 @@ static void disconnectCallback(const redisAsyncContext *c, int status) {
 
 static void commandCallback(struct redisAsyncContext *ac, void* _reply, void* _privdata)
 {
-    redisReply *reply = (redisReply*)_reply;
+    serverReply *reply = (serverReply*)_reply;
     struct _astest *t = (struct _astest *)ac->data;
     assert(t == &astest);
     (void)_privdata;

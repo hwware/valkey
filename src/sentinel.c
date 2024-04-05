@@ -2767,7 +2767,7 @@ void sentinelRefreshInstanceInfo(sentinelRedisInstance *ri, const char *info) {
 void sentinelInfoReplyCallback(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = privdata;
     instanceLink *link = c->data;
-    redisReply *r;
+    serverReply *r;
 
     if (!reply || !link) return;
     link->pending_commands--;
@@ -2792,7 +2792,7 @@ void sentinelDiscardReplyCallback(redisAsyncContext *c, void *reply, void *privd
 void sentinelPingReplyCallback(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = privdata;
     instanceLink *link = c->data;
-    redisReply *r;
+    serverReply *r;
 
     if (!reply || !link) return;
     link->pending_commands--;
@@ -2838,7 +2838,7 @@ void sentinelPingReplyCallback(redisAsyncContext *c, void *reply, void *privdata
 void sentinelPublishReplyCallback(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = privdata;
     instanceLink *link = c->data;
-    redisReply *r;
+    serverReply *r;
 
     if (!reply || !link) return;
     link->pending_commands--;
@@ -2974,7 +2974,7 @@ cleanup:
  * to discover other sentinels attached at the same master. */
 void sentinelReceiveHelloMessages(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = privdata;
-    redisReply *r;
+    serverReply *r;
     UNUSED(c);
 
     if (!reply || !ri) return;
@@ -4647,7 +4647,7 @@ void sentinelCheckObjectivelyDown(sentinelRedisInstance *master) {
 void sentinelReceiveIsMasterDownReply(redisAsyncContext *c, void *reply, void *privdata) {
     sentinelRedisInstance *ri = privdata;
     instanceLink *link = c->data;
-    redisReply *r;
+    serverReply *r;
 
     if (!reply || !link) return;
     link->pending_commands--;

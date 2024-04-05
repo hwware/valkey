@@ -9,7 +9,7 @@
 
 void debugCallback(redisAsyncContext *c, void *r, void *privdata) {
     (void)privdata;
-    redisReply *reply = r;
+    serverReply *reply = r;
     if (reply == NULL) {
         /* The DEBUG SLEEP command will almost always fail, because we have set a 1 second timeout */
         printf("`DEBUG SLEEP` error: %s\n", c->errstr ? c->errstr : "unknown error");
@@ -20,7 +20,7 @@ void debugCallback(redisAsyncContext *c, void *r, void *privdata) {
 }
 
 void getCallback(redisAsyncContext *c, void *r, void *privdata) {
-    redisReply *reply = r;
+    serverReply *reply = r;
     if (reply == NULL) {
         printf("`GET key` error: %s\n", c->errstr ? c->errstr : "unknown error");
         return;

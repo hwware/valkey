@@ -401,7 +401,7 @@ _Note:  There were no changes to code between v1.0.0-rc1 and v1.0.0 so see v1.0.
 ### 0.14.0 (2018-09-25)
 **BREAKING CHANGES**:
 
-* Change `redisReply.len` to `size_t`, as it denotes the the size of a string
+* Change `serverReply.len` to `size_t`, as it denotes the the size of a string
 
   User code should compare this to `size_t` values as well.
   If it was used to compare to other values, casting might be necessary or can be removed, if casting was applied before.

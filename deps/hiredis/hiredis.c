@@ -56,7 +56,7 @@ static redisContextFuncs redisContextDefaultFuncs = {
     .write = redisNetWrite
 };
 
-static redisReply *createReplyObject(int type);
+static serverReply *createReplyObject(int type);
 static void *createStringObject(const redisReadTask *task, char *str, size_t len);
 static void *createArrayObject(const redisReadTask *task, size_t elements);
 static void *createIntegerObject(const redisReadTask *task, long long value);
@@ -77,8 +77,8 @@ static redisReplyObjectFunctions defaultFunctions = {
 };
 
 /* Create a reply object */
-static redisReply *createReplyObject(int type) {
-    redisReply *r = hi_calloc(1,sizeof(*r));
+static serverReply *createReplyObject(int type) {
+    serverReply *r = hi_calloc(1,sizeof(*r));
 
     if (r == NULL)
         return NULL;
@@ -89,7 +89,7 @@ static redisReply *createReplyObject(int type) {
 
 /* Free a reply object */
 void freeReplyObject(void *reply) {
-    redisReply *r = reply;
+    serverReply *r = reply;
     size_t j;
 
     if (r == NULL)
@@ -123,7 +123,7 @@ void freeReplyObject(void *reply) {
 }
 
 static void *createStringObject(const redisReadTask *task, char *str, size_t len) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
     char *buf;
 
     r = createReplyObject(task->type);
@@ -172,14 +172,14 @@ oom:
 }
 
 static void *createArrayObject(const redisReadTask *task, size_t elements) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
 
     r = createReplyObject(task->type);
     if (r == NULL)
         return NULL;
 
     if (elements > 0) {
-        r->element = hi_calloc(elements,sizeof(redisReply*));
+        r->element = hi_calloc(elements,sizeof(serverReply*));
         if (r->element == NULL) {
             freeReplyObject(r);
             return NULL;
@@ -200,7 +200,7 @@ static void *createArrayObject(const redisReadTask *task, size_t elements) {
 }
 
 static void *createIntegerObject(const redisReadTask *task, long long value) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
 
     r = createReplyObject(REDIS_REPLY_INTEGER);
     if (r == NULL)
@@ -220,7 +220,7 @@ static void *createIntegerObject(const redisReadTask *task, long long value) {
 }
 
 static void *createDoubleObject(const redisReadTask *task, double value, char *str, size_t len) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
 
     if (len == SIZE_MAX) // Prevents hi_malloc(0) if len equals to SIZE_MAX
         return NULL;
@@ -257,7 +257,7 @@ static void *createDoubleObject(const redisReadTask *task, double value, char *s
 }
 
 static void *createNilObject(const redisReadTask *task) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
 
     r = createReplyObject(REDIS_REPLY_NIL);
     if (r == NULL)
@@ -275,7 +275,7 @@ static void *createNilObject(const redisReadTask *task) {
 }
 
 static void *createBoolObject(const redisReadTask *task, int bval) {
-    redisReply *r, *parent;
+    serverReply *r, *parent;
 
     r = createReplyObject(REDIS_REPLY_BOOL);
     if (r == NULL)
