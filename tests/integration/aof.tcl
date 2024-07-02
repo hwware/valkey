@@ -495,7 +495,7 @@ tags {"aof external:skip"} {
 
     test {Test valkey-check-aof for old style rdb-preamble AOF} {
         catch {
-            exec src/valkey-check-aof tests/assets/rdb-preamble.aof
+	    exec src/valkey-check-aof tests/assets/rdb-preamble.aof
         } result
         assert_match "*Start checking Old-Style AOF*RDB preamble is OK, proceeding with AOF tail*is valid*" $result
     }
