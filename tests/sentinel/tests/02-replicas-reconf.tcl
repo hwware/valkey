@@ -9,7 +9,7 @@ source "../tests/includes/init-tests.tcl"
 
 proc 02_test_slaves_replication {} {
     uplevel 1 {
-        test "Check that slaves replicate from current primary" {
+        test "Check that replicas replicate from current primary" {
             set master_port [RPort $master_id]
             foreach_valkey_id id {
                 if {$id == $master_id} continue
@@ -57,7 +57,7 @@ foreach_sentinel_id id {
 
 02_test_slaves_replication
 
-test "Kill a slave instance" {
+test "Kill a replica instance" {
     foreach_valkey_id id {
         if {$id == $master_id} continue
         set killed_slave_id $id
@@ -82,7 +82,7 @@ test "Wait for failover to end" {
     }
 }
 
-test "Restart killed slave and test replication of slaves again..." {
+test "Restart killed replica and test replication of replicas again..." {
     restart_instance valkey $killed_slave_id
 }
 

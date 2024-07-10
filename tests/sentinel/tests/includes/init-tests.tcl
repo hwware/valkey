@@ -12,7 +12,7 @@ test "(init) Remove old primary entry from sentinels" {
 }
 
 set redis_slaves [expr $::instances_count - 1]
-test "(init) Create a primary-slaves cluster of [expr $redis_slaves+1] instances" {
+test "(init) Create a primary-replicas cluster of [expr $redis_slaves+1] instances" {
     create_valkey_master_slave_cluster [expr {$redis_slaves+1}]
 }
 set master_id 0
@@ -52,7 +52,7 @@ test "(init) Sentinels are able to auto-discover other sentinels" {
     verify_sentinel_auto_discovery
 }
 
-test "(init) Sentinels are able to auto-discover slaves" {
+test "(init) Sentinels are able to auto-discover replicas" {
     foreach_sentinel_id id {
         wait_for_condition 1000 50 {
             [dict get [S $id SENTINEL MASTER mymaster] num-slaves] == $redis_slaves

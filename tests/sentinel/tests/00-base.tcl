@@ -65,7 +65,7 @@ test "SENTINEL SENTINELS returns a list of sentinel instances" {
      assert_morethan_equal [llength [S 0 SENTINEL SENTINELS mymaster]] 1
 }
 
-test "SENTINEL SLAVES returns a list of the monitored replicas" {
+test "SENTINEL REPLICAS returns a list of the monitored replicas" {
      assert_morethan_equal [llength [S 0 SENTINEL SLAVES mymaster]] 1
 }
 
@@ -98,7 +98,7 @@ test "New primary [join $addr {:}] role matches" {
     assert {[RI $master_id role] eq {master}}
 }
 
-test "All the other slaves now point to the new primary" {
+test "All the other replicas now point to the new primary" {
     foreach_valkey_id id {
         if {$id != $master_id && $id != 0} {
             wait_for_condition 1000 50 {
@@ -110,7 +110,7 @@ test "All the other slaves now point to the new primary" {
     }
 }
 
-test "The old primary eventually gets reconfigured as a slave" {
+test "The old primary eventually gets reconfigured as a replica" {
     wait_for_condition 1000 50 {
         [RI 0 master_port] == [lindex $addr 1]
     } else {
