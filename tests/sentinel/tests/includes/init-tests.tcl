@@ -7,7 +7,7 @@ test "(init) Restart killed instances" {
 
 test "(init) Remove old primary entry from sentinels" {
     foreach_sentinel_id id {
-        catch {S $id SENTINEL REMOVE mymaster}
+        catch {S $id SENTINEL REMOVE myprimary}
     }
 }
 
@@ -21,19 +21,19 @@ test "(init) Sentinels can start monitoring a primary" {
     set sentinels [llength $::sentinel_instances]
     set quorum [expr {$sentinels/2+1}]
     foreach_sentinel_id id {
-        S $id SENTINEL MONITOR mymaster \
+        S $id SENTINEL MONITOR myprimary \
               [get_instance_attrib valkey $master_id host] \
               [get_instance_attrib valkey $master_id port] $quorum
     }
     foreach_sentinel_id id {
-        assert {[S $id sentinel master mymaster] ne {}}
-        S $id SENTINEL SET mymaster down-after-milliseconds 2000
-        S $id SENTINEL SET mymaster failover-timeout 10000
+        assert {[S $id sentinel master myprimary] ne {}}
+        S $id SENTINEL SET myprimary down-after-milliseconds 2000
+        S $id SENTINEL SET myprimary failover-timeout 10000
         S $id SENTINEL debug tilt-period 5000
-        S $id SENTINEL SET mymaster parallel-syncs 10
+        S $id SENTINEL SET myprimary parallel-syncs 10
         if {$::leaked_fds_file != "" && [exec uname] == "Linux"} {
-            S $id SENTINEL SET mymaster notification-script ../../tests/helpers/check_leaked_fds.tcl
-            S $id SENTINEL SET mymaster client-reconfig-script ../../tests/helpers/check_leaked_fds.tcl
+            S $id SENTINEL SET myprimary notification-script ../../tests/helpers/check_leaked_fds.tcl
+            S $id SENTINEL SET myprimary client-reconfig-script ../../tests/helpers/check_leaked_fds.tcl
         }
     }
 }
@@ -41,9 +41,9 @@ test "(init) Sentinels can start monitoring a primary" {
 test "(init) Sentinels can talk with the primary" {
     foreach_sentinel_id id {
         wait_for_condition 1000 50 {
-            [catch {S $id SENTINEL GET-MASTER-ADDR-BY-NAME mymaster}] == 0
+            [catch {S $id SENTINEL GET-MASTER-ADDR-BY-NAME myprimary}] == 0
         } else {
-            fail "Sentinel $id can't talk with the master."
+            fail "Sentinel $id can't talk with the primary."
         }
     }
 }
@@ -55,9 +55,9 @@ test "(init) Sentinels are able to auto-discover other sentinels" {
 test "(init) Sentinels are able to auto-discover replicas" {
     foreach_sentinel_id id {
         wait_for_condition 1000 50 {
-            [dict get [S $id SENTINEL MASTER mymaster] num-slaves] == $redis_slaves
+            [dict get [S $id SENTINEL MASTER myprimary] num-slaves] == $redis_slaves
         } else {
-            fail "At least some sentinel can't detect some slave"
+            fail "At least some sentinel can't detect some replica"
         }
     }
 }
