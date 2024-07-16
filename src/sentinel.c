@@ -3688,7 +3688,7 @@ void sentinelCommand(client *c) {
 "DEBUG [<param> <value> ...]",
 "    Show a list of configurable time parameters and their values (milliseconds).",
 "    Or update current configurable parameters values (one or more).",
-"GET-MASTER-ADDR-BY-NAME <primary-name>",
+"GET-PRIMARY-ADDR-BY-NAME <primary-name>",
 "    Return the ip and port number of the primary with that name.",
 "FAILOVER <primary-name>",
 "    Manually failover a primary node without asking for agreement from other",
@@ -3807,7 +3807,8 @@ NULL
         /* SENTINEL RESET <pattern> */
         if (c->argc != 3) goto numargserr;
         addReplyLongLong(c, sentinelResetPrimariesByPattern(c->argv[2]->ptr, SENTINEL_GENERATE_EVENT));
-    } else if (!strcasecmp(c->argv[1]->ptr, "get-master-addr-by-name")) {
+    } else if (!strcasecmp(c->argv[1]->ptr, "get-primary-addr-by-name") ||
+               !strcasecmp(c->argv[1]->ptr, "get-master-addr-by-name")) {
         /* SENTINEL GET-PRIMARY-ADDR-BY-NAME <primary-name> */
         sentinelValkeyInstance *ri;
 

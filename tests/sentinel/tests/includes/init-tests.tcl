@@ -41,7 +41,7 @@ test "(init) Sentinels can start monitoring a primary" {
 test "(init) Sentinels can talk with the primary" {
     foreach_sentinel_id id {
         wait_for_condition 1000 50 {
-            [catch {S $id SENTINEL GET-MASTER-ADDR-BY-NAME mymaster}] == 0
+            [catch {S $id SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster}] == 0
         } else {
             fail "Sentinel $id can't talk with the master."
         }

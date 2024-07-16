@@ -77,20 +77,20 @@ test "SENTINEL SIMULATE-FAILURE HELP list supported flags" {
 
 test "Basic failover works if the primary is down" {
     set old_port [RPort $master_id]
-    set addr [S 0 SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S 0 SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     assert {[lindex $addr 1] == $old_port}
     kill_instance valkey $master_id
     foreach_sentinel_id id {
         S $id sentinel debug ping-period 500
         S $id sentinel debug ask-period 500  
         wait_for_condition 1000 100 {
-            [lindex [S $id SENTINEL GET-MASTER-ADDR-BY-NAME mymaster] 1] != $old_port
+            [lindex [S $id SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster] 1] != $old_port
         } else {
             fail "At least one Sentinel did not receive failover info"
         }
     }
     restart_instance valkey $master_id
-    set addr [S 0 SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S 0 SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     set master_id [get_instance_id_by_port valkey [lindex $addr 1]]
 }
 
@@ -123,12 +123,12 @@ test "ODOWN is not possible without N (quorum) Sentinels reports" {
         S $id SENTINEL SET mymaster quorum [expr $sentinels+1]
     }
     set old_port [RPort $master_id]
-    set addr [S 0 SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S 0 SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     assert {[lindex $addr 1] == $old_port}
     kill_instance valkey $master_id
 
     # Make sure failover did not happened.
-    set addr [S 0 SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S 0 SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     assert {[lindex $addr 1] == $old_port}
     restart_instance valkey $master_id
 }
@@ -147,7 +147,7 @@ test "Failover is not possible without majority agreement" {
     kill_instance valkey $master_id
 
     # Make sure failover did not happened.
-    set addr [S $quorum SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S $quorum SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     assert {[lindex $addr 1] == $old_port}
     restart_instance valkey $master_id
 
@@ -175,13 +175,13 @@ test "Failover works if we configure for absolute agreement" {
 
     foreach_sentinel_id id {
         wait_for_condition 1000 100 {
-            [lindex [S $id SENTINEL GET-MASTER-ADDR-BY-NAME mymaster] 1] != $old_port
+            [lindex [S $id SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster] 1] != $old_port
         } else {
             fail "At least one Sentinel did not receive failover info"
         }
     }
     restart_instance valkey $master_id
-    set addr [S 0 SENTINEL GET-MASTER-ADDR-BY-NAME mymaster]
+    set addr [S 0 SENTINEL GET-PRIMARY-ADDR-BY-NAME mymaster]
     set master_id [get_instance_id_by_port valkey [lindex $addr 1]]
 
     # Set the min ODOWN agreement back to strict majority.
