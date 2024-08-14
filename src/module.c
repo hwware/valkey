@@ -13036,6 +13036,8 @@ int VM_RdbSave(ValkeyModuleCtx *ctx, ValkeyModuleRdbStream *stream, int flags) {
  * MODULE LIST
  * MODULE LOAD <path> [args...]
  * MODULE LOADEX <path> [[CONFIG NAME VALUE] [CONFIG NAME VALUE]] [ARGS ...]
+ * MODULE SET-ARGUMENT <name> [args...]
+ * MODULE RESET-ARGUMENT <name>
  * MODULE UNLOAD <name>
  */
 void moduleCommand(client *c) {
@@ -13049,6 +13051,10 @@ void moduleCommand(client *c) {
             "    Load a module library from <path>, passing to it any optional arguments.",
             "LOADEX <path> [[CONFIG NAME VALUE] [CONFIG NAME VALUE]] [ARGS ...]",
             "    Load a module library from <path>, while passing it module configurations and optional arguments.",
+            "SET-ARGUMENT <name> [<arg> ...]",
+            "    Set module arguments to new values during runtime.",
+            "RESET-ARGUMENT <name>",
+            "    Reset the module arguments to the loaded values.",
             "UNLOAD <name>",
             "    Unload a module.",
             NULL};
@@ -13095,6 +13101,10 @@ void moduleCommand(client *c) {
         }
     } else if (!strcasecmp(subcmd, "list") && c->argc == 2) {
         addReplyLoadedModules(c);
+    } else if (!strcasecmp(subcmd, "set-argument") && c->argc >= 3) {
+        addReply(c, shared.ok);
+    } else if (!strcasecmp(subcmd, "reset-argument") && c->argc == 3) {
+        addReply(c, shared.ok);
     } else {
         addReplySubcommandSyntaxError(c);
         return;
