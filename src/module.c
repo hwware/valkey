@@ -11940,6 +11940,16 @@ void moduleLoadQueueEntryFree(struct moduleLoadQueueEntry *loadmod) {
     zfree(loadmod);
 }
 
+
+void moduleRunTimeEntryFree(struct moduleRunTimeEntry *runtime_entry) {
+    if (!runtime_entry) return;
+    for (int i = 0; i < runtime_entry->argc; i++) {
+        decrRefCount(runtime_entry->argv[i]);
+    }
+    zfree(runtime_entry->argv);
+    zfree(runtime_entry);
+}
+
 /* Remove Module Configs from standardConfig array in config.c */
 void moduleRemoveConfigs(ValkeyModule *module) {
     listIter li;
@@ -12006,6 +12016,7 @@ void moduleFreeModuleStructure(struct ValkeyModule *module) {
     listRelease(module->module_configs);
     sdsfree(module->name);
     moduleLoadQueueEntryFree(module->loadmod);
+    moduleRunTimeEntryFree(module->runtime_entry);
     zfree(module);
 }
 
@@ -13102,7 +13113,23 @@ void moduleCommand(client *c) {
     } else if (!strcasecmp(subcmd, "list") && c->argc == 2) {
         addReplyLoadedModules(c);
     } else if (!strcasecmp(subcmd, "set-argument") && c->argc >= 3) {
-        addReply(c, shared.ok);
+        struct ValkeyModule *module = dictFetchValue(modules, c->argv[2]->ptr);
+        if (module != NULL) {
+            dictIterator *di = dictGetIterator(modules);
+            dictEntry *de;
+            while ((de = dictNext(di)) != NULL) {
+                struct ValkeyModule *module = dictGetVal(de);
+                moduleRunTimeEntryFree(module->runtime_entry);
+                struct moduleRunTimeEntry *runtime_entry;
+                runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
+            }
+
+            addReply(c, shared.ok);
+        } else {
+            addReplyError(c, "Error set arguments for module: no such module with that name ");
+            serverLog(LL_WARNING, "Error set arguments for module %s: no such module with that name",
+                      (sds)c->argv[2]->ptr);
+        }
     } else if (!strcasecmp(subcmd, "reset-argument") && c->argc == 3) {
         addReply(c, shared.ok);
     } else {

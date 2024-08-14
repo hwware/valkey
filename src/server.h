@@ -711,6 +711,7 @@ struct ValkeyModuleIO;
 struct ValkeyModuleDigest;
 struct ValkeyModuleCtx;
 struct moduleLoadQueueEntry;
+struct moduleRunTimeEntry;
 struct ValkeyModuleKeyOptCtx;
 struct ValkeyModuleCommand;
 struct clusterState;
@@ -803,7 +804,8 @@ struct ValkeyModule {
     int blocked_clients;                  /* Count of ValkeyModuleBlockedClient in this module. */
     ValkeyModuleInfoFunc info_cb;         /* Callback for module to add INFO fields. */
     ValkeyModuleDefragFunc defrag_cb;     /* Callback for global data defrag. */
-    struct moduleLoadQueueEntry *loadmod; /* Module load arguments for config rewrite. */
+    struct moduleLoadQueueEntry *loadmod; /* Module load arguments*/
+    struct moduleRunTimeEntry *runtime_entry; /* Module load arguments for config rewrite. */
     int num_commands_with_acl_categories; /* Number of commands in this module included in acl categories */
     int onload;                           /* Flag to identify if the call is being made from Onload (0 or 1) */
     size_t num_acl_categories_added;      /* Number of acl categories added by this module. */
@@ -1414,6 +1416,11 @@ struct saveparam {
 
 struct moduleLoadQueueEntry {
     sds path;
+    int argc;
+    robj **argv;
+};
+
+struct moduleRunTimeEntry {
     int argc;
     robj **argv;
 };
