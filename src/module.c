@@ -13048,30 +13048,13 @@ int VM_RdbSave(ValkeyModuleCtx *ctx, ValkeyModuleRdbStream *stream, int flags) {
 }
 
 void updateModuleRunTimeArgument(struct ValkeyModule *module, void **argv, int argc) {
-    // moduleRunTimeEntryFree(module->runtime_entry);
-    struct moduleRunTimeEntry *runtime_entry;
-    int i;
-    runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
-    runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
-    for (i = 0; i < argc; i++) {
-        runtime_entry->argv[i] = createRawStringObject(argv[i], sdslen(argv[i]));
+    module->runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
+    module->runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
+    module->runtime_entry->argc = argc;
+    for (int i = 0; i < argc; i++) {
+        module->runtime_entry->argv[i] = argv[i];
+        incrRefCount(module->runtime_entry->argv[i]);
     }
-    module->runtime_entry = runtime_entry;
-    /*
-    dictIterator *di = dictGetIterator(modules);
-    dictEntry *de;
-    int i;
-    while ((de = dictNext(di)) != NULL) {
-        struct ValkeyModule *valkey_module = dictGetVal(de);
-        moduleRunTimeEntryFree(valkey_module->runtime_entry);
-        struct moduleRunTimeEntry *runtime_entry;
-        runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
-    runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
-        for (i = 0; i < argc; i++) {
-            runtime_entry->argv[i] = createRawStringObject(argv[i], sdslen(argv[i]));
-        }
-    }
-    */
 }
 
 /* MODULE command.
