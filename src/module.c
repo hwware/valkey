@@ -12224,12 +12224,17 @@ int moduleLoad(const char *path, void **module_argv, int module_argc, int is_loa
     ctx.module->blocked_clients = 0;
     ctx.module->handle = handle;
     ctx.module->loadmod = zmalloc(sizeof(struct moduleLoadQueueEntry));
+    ctx.module->runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
     ctx.module->loadmod->path = sdsnew(path);
     ctx.module->loadmod->argv = module_argc ? zmalloc(sizeof(robj *) * module_argc) : NULL;
     ctx.module->loadmod->argc = module_argc;
+    ctx.module->runtime_entry->argv = module_argc ? zmalloc(sizeof(robj *) * module_argc) : NULL;
+    ctx.module->runtime_entry->argc = module_argc;
     for (int i = 0; i < module_argc; i++) {
         ctx.module->loadmod->argv[i] = module_argv[i];
         incrRefCount(ctx.module->loadmod->argv[i]);
+        ctx.module->runtime_entry->argv[i] = module_argv[i];
+        incrRefCount(ctx.module->runtime_entry->argv[i]);
     }
 
     /* If module commands have ACL categories, recompute command bits
@@ -12374,9 +12379,9 @@ void addReplyLoadedModules(client *c) {
         addReplyBulkCString(c, "path");
         addReplyBulkCBuffer(c, path, sdslen(path));
         addReplyBulkCString(c, "args");
-        addReplyArrayLen(c, module->loadmod->argc);
-        for (int i = 0; i < module->loadmod->argc; i++) {
-            addReplyBulk(c, module->loadmod->argv[i]);
+        addReplyArrayLen(c, module->runtime_entry->argc);
+        for (int i = 0; i < module->runtime_entry->argc; i++) {
+            addReplyBulk(c, module->runtime_entry->argv[i]);
         }
     }
     dictReleaseIterator(di);
@@ -13042,6 +13047,33 @@ int VM_RdbSave(ValkeyModuleCtx *ctx, ValkeyModuleRdbStream *stream, int flags) {
     return VALKEYMODULE_OK;
 }
 
+void updateModuleRunTimeArgument(struct ValkeyModule *module, void **argv, int argc) {
+    // moduleRunTimeEntryFree(module->runtime_entry);
+    struct moduleRunTimeEntry *runtime_entry;
+    int i;
+    runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
+    runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
+    for (i = 0; i < argc; i++) {
+        runtime_entry->argv[i] = createRawStringObject(argv[i], sdslen(argv[i]));
+    }
+    module->runtime_entry = runtime_entry;
+    /*
+    dictIterator *di = dictGetIterator(modules);
+    dictEntry *de;
+    int i;
+    while ((de = dictNext(di)) != NULL) {
+        struct ValkeyModule *valkey_module = dictGetVal(de);
+        moduleRunTimeEntryFree(valkey_module->runtime_entry);
+        struct moduleRunTimeEntry *runtime_entry;
+        runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
+    runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
+        for (i = 0; i < argc; i++) {
+            runtime_entry->argv[i] = createRawStringObject(argv[i], sdslen(argv[i]));
+        }
+    }
+    */
+}
+
 /* MODULE command.
  *
  * MODULE LIST
@@ -13115,15 +13147,14 @@ void moduleCommand(client *c) {
     } else if (!strcasecmp(subcmd, "set-argument") && c->argc >= 3) {
         struct ValkeyModule *module = dictFetchValue(modules, c->argv[2]->ptr);
         if (module != NULL) {
-            dictIterator *di = dictGetIterator(modules);
-            dictEntry *de;
-            while ((de = dictNext(di)) != NULL) {
-                struct ValkeyModule *module = dictGetVal(de);
-                moduleRunTimeEntryFree(module->runtime_entry);
-                struct moduleRunTimeEntry *runtime_entry;
-                runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
-            }
+            robj **argv = NULL;
+            int argc = 0;
 
+            if (c->argc > 3) {
+                argc = c->argc - 3;
+                argv = &c->argv[3];
+            }
+            updateModuleRunTimeArgument(module, (void **)argv, argc);
             addReply(c, shared.ok);
         } else {
             addReplyError(c, "Error set arguments for module: no such module with that name ");
