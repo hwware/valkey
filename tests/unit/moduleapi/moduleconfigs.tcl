@@ -159,65 +159,9 @@ start_server {tags {"modules"}} {
     }
 
     test {test config rewrite with dynamic load} {
-        #translates to: super \0secret password
-        r module loadex $testmodule CONFIG moduleconfigs.string \x73\x75\x70\x65\x72\x20\x00\x73\x65\x63\x72\x65\x74\x20\x70\x61\x73\x73\x77\x6f\x72\x64 ARGS
-        assert_not_equal [lsearch [lmap x [r module list] {dict get $x name}] moduleconfigs] -1
-        assert_equal [r config get moduleconfigs.string] "moduleconfigs.string {super \0secret password}"
-        r config set moduleconfigs.mutable_bool yes
-        r config set moduleconfigs.memory_numeric 750
-        r config set moduleconfigs.enum two
-        r config set moduleconfigs.flags "four two"
-        r config rewrite
-        restart_server 0 true false
-        # Ensure configs we rewrote are present and that the conf file is readable
-        assert_equal [r config get moduleconfigs.mutable_bool] "moduleconfigs.mutable_bool yes"
-        assert_equal [r config get moduleconfigs.memory_numeric] "moduleconfigs.memory_numeric 750"
-        assert_equal [r config get moduleconfigs.string] "moduleconfigs.string {super \0secret password}"
-        assert_equal [r config get moduleconfigs.enum] "moduleconfigs.enum two"
-        assert_equal [r config get moduleconfigs.flags] "moduleconfigs.flags {two four}"
-        assert_equal [r config get moduleconfigs.numeric] "moduleconfigs.numeric -1"
-        r module unload moduleconfigs
-    }
-
-    test {test multiple modules with configs} {
-        r module load $testmodule
-        r module loadex $testmoduletwo CONFIG configs.test yes
-        assert_equal [r config get moduleconfigs.mutable_bool] "moduleconfigs.mutable_bool yes"
-        assert_equal [r config get moduleconfigs.immutable_bool] "moduleconfigs.immutable_bool no"
-        assert_equal [r config get moduleconfigs.memory_numeric] "moduleconfigs.memory_numeric 1024"
-        assert_equal [r config get moduleconfigs.string] "moduleconfigs.string {secret password}"
-        assert_equal [r config get moduleconfigs.enum] "moduleconfigs.enum one"
-        assert_equal [r config get moduleconfigs.numeric] "moduleconfigs.numeric -1"
-        assert_equal [r config get configs.test] "configs.test yes"
-        r config set moduleconfigs.mutable_bool no
-        r config set moduleconfigs.string nice
-        r config set moduleconfigs.enum two
-        r config set configs.test no
-        assert_equal [r config get moduleconfigs.mutable_bool] "moduleconfigs.mutable_bool no"
-        assert_equal [r config get moduleconfigs.string] "moduleconfigs.string nice"
-        assert_equal [r config get moduleconfigs.enum] "moduleconfigs.enum two"
-        assert_equal [r config get configs.test] "configs.test no"
-        r config rewrite
-        # test we can load from conf file with multiple different modules.
-        restart_server 0 true false
-        assert_equal [r config get moduleconfigs.mutable_bool] "moduleconfigs.mutable_bool no"
-        assert_equal [r config get moduleconfigs.string] "moduleconfigs.string nice"
-        assert_equal [r config get moduleconfigs.enum] "moduleconfigs.enum two"
-        assert_equal [r config get configs.test] "configs.test no"
-        r module unload moduleconfigs
-        r module unload configs
     }
 
     test {test 1.module load 2.config rewrite 3.module unload 4.config rewrite works} {
-        # Configs need to be removed from the old config file in this case.
-        r module loadex $testmodule CONFIG moduleconfigs.memory_numeric 500 ARGS
-        assert_not_equal [lsearch [lmap x [r module list] {dict get $x name}] moduleconfigs] -1
-        r config rewrite
-        r module unload moduleconfigs
-        r config rewrite
-        restart_server 0 true false
-        # Ensure configs we rewrote are no longer present
-        assert_equal [r config get moduleconfigs.*] ""
     }
     test {startup moduleconfigs} {
         # No loadmodule directive

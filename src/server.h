@@ -711,6 +711,7 @@ struct ValkeyModuleIO;
 struct ValkeyModuleDigest;
 struct ValkeyModuleCtx;
 struct moduleLoadQueueEntry;
+struct moduleRunTimeEntry;
 struct ValkeyModuleKeyOptCtx;
 struct ValkeyModuleCommand;
 struct clusterState;
@@ -787,26 +788,27 @@ typedef struct moduleValue {
 
 /* This structure represents a module inside the system. */
 struct ValkeyModule {
-    void *handle;                         /* Module dlopen() handle. */
-    char *name;                           /* Module name. */
-    int ver;                              /* Module version. We use just progressive integers. */
-    int apiver;                           /* Module API version as requested during initialization.*/
-    list *types;                          /* Module data types. */
-    list *usedby;                         /* List of modules using APIs from this one. */
-    list *using;                          /* List of modules we use some APIs of. */
-    list *filters;                        /* List of filters the module has registered. */
-    list *module_configs;                 /* List of configurations the module has registered */
-    int configs_initialized;              /* Have the module configurations been initialized? */
-    int in_call;                          /* RM_Call() nesting level */
-    int in_hook;                          /* Hooks callback nesting level for this module (0 or 1). */
-    int options;                          /* Module options and capabilities. */
-    int blocked_clients;                  /* Count of ValkeyModuleBlockedClient in this module. */
-    ValkeyModuleInfoFunc info_cb;         /* Callback for module to add INFO fields. */
-    ValkeyModuleDefragFunc defrag_cb;     /* Callback for global data defrag. */
-    struct moduleLoadQueueEntry *loadmod; /* Module load arguments for config rewrite. */
-    int num_commands_with_acl_categories; /* Number of commands in this module included in acl categories */
-    int onload;                           /* Flag to identify if the call is being made from Onload (0 or 1) */
-    size_t num_acl_categories_added;      /* Number of acl categories added by this module. */
+    void *handle;                              /* Module dlopen() handle. */
+    char *name;                                /* Module name. */
+    int ver;                                   /* Module version. We use just progressive integers. */
+    int apiver;                                /* Module API version as requested during initialization.*/
+    list *types;                               /* Module data types. */
+    list *usedby;                              /* List of modules using APIs from this one. */
+    list *using;                               /* List of modules we use some APIs of. */
+    list *filters;                             /* List of filters the module has registered. */
+    list *module_configs;                      /* List of configurations the module has registered */
+    int configs_initialized;                   /* Have the module configurations been initialized? */
+    int in_call;                               /* RM_Call() nesting level */
+    int in_hook;                               /* Hooks callback nesting level for this module (0 or 1). */
+    int options;                               /* Module options and capabilities. */
+    int blocked_clients;                       /* Count of ValkeyModuleBlockedClient in this module. */
+    ValkeyModuleInfoFunc info_cb;              /* Callback for module to add INFO fields. */
+    ValkeyModuleDefragFunc defrag_cb;          /* Callback for global data defrag. */
+    struct moduleLoadQueueEntry *loadmod;      /* Module load arguments*/
+    struct moduleRunTimeEntry *runtime_entry;  /* Module load arguments for config rewrite. */
+    int num_commands_with_acl_categories;      /* Number of commands in this module included in acl categories */
+    int onload;                                /* Flag to identify if the call is being made from Onload (0 or 1) */
+    size_t num_acl_categories_added;           /* Number of acl categories added by this module. */
 };
 typedef struct ValkeyModule ValkeyModule;
 
@@ -1414,6 +1416,11 @@ struct saveparam {
 
 struct moduleLoadQueueEntry {
     sds path;
+    int argc;
+    robj **argv;
+};
+
+struct moduleRunTimeEntry {
     int argc;
     robj **argv;
 };

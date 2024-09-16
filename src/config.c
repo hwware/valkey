@@ -1548,9 +1548,9 @@ void rewriteConfigLoadmoduleOption(struct rewriteConfigState *state) {
         struct ValkeyModule *module = dictGetVal(de);
         line = sdsnew("loadmodule ");
         line = sdscatsds(line, module->loadmod->path);
-        for (int i = 0; i < module->loadmod->argc; i++) {
+        for (int i = 0; i < module->runtime_entry->argc; i++) {
             line = sdscatlen(line, " ", 1);
-            line = sdscatsds(line, module->loadmod->argv[i]->ptr);
+            line = sdscatsds(line, module->runtime_entry->argv[i]->ptr);
         }
         rewriteConfigRewriteLine(state, "loadmodule", line, 1);
     }

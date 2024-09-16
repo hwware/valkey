@@ -11940,6 +11940,16 @@ void moduleLoadQueueEntryFree(struct moduleLoadQueueEntry *loadmod) {
     zfree(loadmod);
 }
 
+
+void moduleRunTimeEntryFree(struct moduleRunTimeEntry *runtime_entry) {
+    if (!runtime_entry) return;
+    for (int i = 0; i < runtime_entry->argc; i++) {
+        decrRefCount(runtime_entry->argv[i]);
+    }
+    zfree(runtime_entry->argv);
+    zfree(runtime_entry);
+}
+
 /* Remove Module Configs from standardConfig array in config.c */
 void moduleRemoveConfigs(ValkeyModule *module) {
     listIter li;
@@ -12006,6 +12016,7 @@ void moduleFreeModuleStructure(struct ValkeyModule *module) {
     listRelease(module->module_configs);
     sdsfree(module->name);
     moduleLoadQueueEntryFree(module->loadmod);
+    moduleRunTimeEntryFree(module->runtime_entry);
     zfree(module);
 }
 
@@ -12213,12 +12224,17 @@ int moduleLoad(const char *path, void **module_argv, int module_argc, int is_loa
     ctx.module->blocked_clients = 0;
     ctx.module->handle = handle;
     ctx.module->loadmod = zmalloc(sizeof(struct moduleLoadQueueEntry));
+    ctx.module->runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
     ctx.module->loadmod->path = sdsnew(path);
     ctx.module->loadmod->argv = module_argc ? zmalloc(sizeof(robj *) * module_argc) : NULL;
     ctx.module->loadmod->argc = module_argc;
+    ctx.module->runtime_entry->argv = module_argc ? zmalloc(sizeof(robj *) * module_argc) : NULL;
+    ctx.module->runtime_entry->argc = module_argc;
     for (int i = 0; i < module_argc; i++) {
         ctx.module->loadmod->argv[i] = module_argv[i];
         incrRefCount(ctx.module->loadmod->argv[i]);
+        ctx.module->runtime_entry->argv[i] = module_argv[i];
+        incrRefCount(ctx.module->runtime_entry->argv[i]);
     }
 
     /* If module commands have ACL categories, recompute command bits
@@ -12363,9 +12379,9 @@ void addReplyLoadedModules(client *c) {
         addReplyBulkCString(c, "path");
         addReplyBulkCBuffer(c, path, sdslen(path));
         addReplyBulkCString(c, "args");
-        addReplyArrayLen(c, module->loadmod->argc);
-        for (int i = 0; i < module->loadmod->argc; i++) {
-            addReplyBulk(c, module->loadmod->argv[i]);
+        addReplyArrayLen(c, module->runtime_entry->argc);
+        for (int i = 0; i < module->runtime_entry->argc; i++) {
+            addReplyBulk(c, module->runtime_entry->argv[i]);
         }
     }
     dictReleaseIterator(di);
@@ -13031,11 +13047,23 @@ int VM_RdbSave(ValkeyModuleCtx *ctx, ValkeyModuleRdbStream *stream, int flags) {
     return VALKEYMODULE_OK;
 }
 
+void updateModuleRunTimeArgument(struct ValkeyModule *module, void **argv, int argc) {
+    module->runtime_entry = zmalloc(sizeof(struct moduleRunTimeEntry));
+    module->runtime_entry->argv = argc ? zmalloc(sizeof(robj *) * argc) : NULL;
+    module->runtime_entry->argc = argc;
+    for (int i = 0; i < argc; i++) {
+        module->runtime_entry->argv[i] = argv[i];
+        incrRefCount(module->runtime_entry->argv[i]);
+    }
+}
+
 /* MODULE command.
  *
  * MODULE LIST
  * MODULE LOAD <path> [args...]
  * MODULE LOADEX <path> [[CONFIG NAME VALUE] [CONFIG NAME VALUE]] [ARGS ...]
+ * MODULE SET-ARGUMENT <name> [args...]
+ * MODULE RESET-ARGUMENT <name>
  * MODULE UNLOAD <name>
  */
 void moduleCommand(client *c) {
@@ -13049,6 +13077,10 @@ void moduleCommand(client *c) {
             "    Load a module library from <path>, passing to it any optional arguments.",
             "LOADEX <path> [[CONFIG NAME VALUE] [CONFIG NAME VALUE]] [ARGS ...]",
             "    Load a module library from <path>, while passing it module configurations and optional arguments.",
+            "SET-ARGUMENT <name> [<arg> ...]",
+            "    Set module arguments to new values during runtime.",
+            "RESET-ARGUMENT <name>",
+            "    Reset the module arguments to the loaded values.",
             "UNLOAD <name>",
             "    Unload a module.",
             NULL};
@@ -13095,6 +13127,25 @@ void moduleCommand(client *c) {
         }
     } else if (!strcasecmp(subcmd, "list") && c->argc == 2) {
         addReplyLoadedModules(c);
+    } else if (!strcasecmp(subcmd, "set-argument") && c->argc >= 3) {
+        struct ValkeyModule *module = dictFetchValue(modules, c->argv[2]->ptr);
+        if (module != NULL) {
+            robj **argv = NULL;
+            int argc = 0;
+
+            if (c->argc > 3) {
+                argc = c->argc - 3;
+                argv = &c->argv[3];
+            }
+            updateModuleRunTimeArgument(module, (void **)argv, argc);
+            addReply(c, shared.ok);
+        } else {
+            addReplyError(c, "Error set arguments for module: no such module with that name ");
+            serverLog(LL_WARNING, "Error set arguments for module %s: no such module with that name",
+                      (sds)c->argv[2]->ptr);
+        }
+    } else if (!strcasecmp(subcmd, "reset-argument") && c->argc == 3) {
+        addReply(c, shared.ok);
     } else {
         addReplySubcommandSyntaxError(c);
         return;
