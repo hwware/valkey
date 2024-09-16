@@ -12016,7 +12016,7 @@ void moduleFreeModuleStructure(struct ValkeyModule *module) {
     listRelease(module->module_configs);
     sdsfree(module->name);
     moduleLoadQueueEntryFree(module->loadmod);
-    // moduleRunTimeEntryFree(module->runtime_entry);
+    moduleRunTimeEntryFree(module->runtime_entry);
     zfree(module);
 }
 
