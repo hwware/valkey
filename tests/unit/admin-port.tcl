@@ -16,6 +16,13 @@ tags {external:skip tls:skip} {
         }
     }
 
+    test {admin-port: setting admin-port to server port should fail} {
+        start_server {} {
+            catch {r CONFIG SET port [srv 0 admin-port]} e
+            assert_match {*Unable to listen on this port*} $e
+        }
+    }
+
     test {admin-port: client could connect on admin-port after maxclients reached} {
         start_server {} {
             set original_maxclients [lindex [r config get maxclients] 1]
