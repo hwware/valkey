@@ -3042,6 +3042,15 @@ client *moduleGetReplyClient(ValkeyModuleCtx *ctx) {
     }
 }
 
+int VM_UpdateRunTimeArgs(ValkeyModuleCtx *ctx, int index, char *value) {
+    client *c = moduleGetReplyClient(ctx);
+    if (c == NULL) return VALKEYMODULE_OK;
+
+    ValkeyModuleString *o = createStringObject(value, strlen(value));
+    ctx->module->loadmod->argv[index] = o;
+    return VALKEYMODULE_OK;
+}
+
 /* Send an integer reply to the client, with the specified `long long` value.
  * The function always returns VALKEYMODULE_OK. */
 int VM_ReplyWithLongLong(ValkeyModuleCtx *ctx, long long ll) {
@@ -13560,6 +13569,7 @@ void moduleRegisterCoreAPI(void) {
     REGISTER_API(SetModuleAttribs);
     REGISTER_API(IsModuleNameBusy);
     REGISTER_API(WrongArity);
+    REGISTER_API(UpdateRunTimeArgs);
     REGISTER_API(ReplyWithLongLong);
     REGISTER_API(ReplyWithError);
     REGISTER_API(ReplyWithErrorFormat);
