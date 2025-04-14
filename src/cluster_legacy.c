@@ -7534,7 +7534,6 @@ int clusterDecodeOpenSlotsAuxField(int rdbflags, sds s) {
             server.cluster->migrating_slots_to[slot] = node;
         }
     }
-
     return C_OK;
 }
 
