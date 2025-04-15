@@ -888,7 +888,6 @@ void displayDataTypeArray(keysizeInfo *keysize_array, int length) {
 }
 
 void scaleKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long value, char type) {
-    serverLog(LL_WARNING, "---------- Now we are in the scale function--------------");
     displayDataTypeArray(keysize_array, length);
     int high_bound = keysize_array[length - 1].element_size;
     int base = high_bound;
@@ -982,14 +981,28 @@ void updateKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long 
     if (curr > keysize_array[high].element_size) {
         scaleKeySizeArray(c, keysize_array, length, curr, type);
         switch (type) {
-        case 'l': high = c->db->lists_array_length - 1; break;
-        case 'h': high = c->db->hashes_array_length - 1; break;
-        case 's': high = c->db->sets_array_length - 1; break;
-        case 'z': high = c->db->zsets_array_length - 1; break;
-        default: high = c->db->strings_array_length - 1; break;
+        case 'l':
+            high = c->db->lists_array_length - 1;
+            keysize_array = c->db->lists_array;
+            break;
+        case 'h':
+            high = c->db->hashes_array_length - 1;
+            keysize_array = c->db->hashes_array;
+            break;
+        case 's':
+            high = c->db->sets_array_length - 1;
+            keysize_array = c->db->sets_array;
+            break;
+        case 'z':
+            high = c->db->zsets_array_length - 1;
+            keysize_array = c->db->zsets_array;
+            break;
+        default:
+            high = c->db->strings_array_length - 1;
+            keysize_array = c->db->strings_array;
+            break;
         }
     }
-
     if (previous != 0) {
         decreaseDataTypeArrayPreviousValue(keysize_array, low, high, previous);
     }
