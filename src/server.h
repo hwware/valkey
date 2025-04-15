@@ -818,6 +818,11 @@ typedef struct replBufBlock {
     char buf[];
 } replBufBlock;
 
+typedef struct keysizeInfo {
+    long element_size;
+    long num;
+} keysizeInfo;
+
 /* Database representation. There are multiple databases identified
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
@@ -833,6 +838,21 @@ typedef struct serverDb {
     int id;                               /* Database ID */
     long long avg_ttl;                    /* Average TTL, just for stats */
     unsigned long expires_cursor;         /* Cursor of the active expire cycle. */
+    keysizeInfo *lists_array;
+    int lists_array_length;
+    unsigned long long lists_number_of_elements;
+    keysizeInfo *sets_array;
+    int sets_array_length;
+    unsigned long long sets_number_of_elements;
+    keysizeInfo *hashes_array;
+    int hashes_array_length;
+    unsigned long long hashes_number_of_elements;
+    keysizeInfo *zsets_array;
+    int zsets_array_length;
+    unsigned long long zsets_number_of_elements;
+    keysizeInfo *strings_array;
+    int strings_array_length;
+    unsigned long long strings_number_of_elements;
 } serverDb;
 
 /* forward declaration for functions ctx */
@@ -3211,6 +3231,9 @@ void *activeDefragAlloc(void *ptr);
 robj *activeDefragStringOb(robj *ob);
 void dismissSds(sds s);
 void dismissMemoryInChild(void);
+void displayDataTypeArray(keysizeInfo *keysize_array, int length);
+void scaleKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long value, char type);
+void updateKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long previous, long curr, char type);
 
 #define RESTART_SERVER_NONE 0
 #define RESTART_SERVER_GRACEFULLY (1 << 0)     /* Do proper shutdown. */

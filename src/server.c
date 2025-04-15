@@ -880,6 +880,124 @@ void trackInstantaneousMetric(int metric, long long current_value, long long cur
     server.inst_metric[metric].last_sample_value = current_value;
 }
 
+void displayDataTypeArray(keysizeInfo *keysize_array, int length) {
+    serverLog(LL_WARNING, "Current array length is %d", length);
+    for (int i = 0; i < length; i++) {
+        serverLog(LL_WARNING, "Item %ld and value is %ld", keysize_array[i].element_size, keysize_array[i].num);
+    }
+}
+
+void scaleKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long value, char type) {
+    serverLog(LL_WARNING, "---------- Now we are in the scale function--------------");
+    displayDataTypeArray(keysize_array, length);
+    int high_bound = keysize_array[length - 1].element_size;
+    int base = high_bound;
+    int count = 0;
+    while (high_bound < value) {
+        count++;
+        high_bound = high_bound * 2;
+    }
+    keysizeInfo *new_array = zmalloc(sizeof(keysizeInfo) * (count + length));
+    for (int i = 0; i < length; i++) {
+        new_array[i].element_size = keysize_array[i].element_size;
+        new_array[i].num = keysize_array[i].num;
+    }
+    for (int i = length; i < (count + length); i++) {
+        base *= 2;
+        new_array[i].element_size = base;
+        new_array[i].num = 0;
+    }
+    zfree(keysize_array);
+    switch (type) {
+    case 'l':
+        c->db->lists_array = new_array;
+        c->db->lists_array_length = count + length;
+        break;
+    case 'h':
+        c->db->hashes_array = new_array;
+        c->db->hashes_array_length = count + length;
+        break;
+    case 's':
+        c->db->sets_array = new_array;
+        c->db->sets_array_length = count + length;
+        break;
+    case 'z':
+        c->db->zsets_array = new_array;
+        c->db->zsets_array_length = count + length;
+        break;
+    default:
+        c->db->strings_array = new_array;
+        c->db->strings_array_length = count + length;
+        break;
+    }
+}
+
+void decreaseDataTypeArrayPreviousValue(keysizeInfo *keysize_array, int low, int high, int value) {
+    if (keysize_array[low].element_size == value) {
+        keysize_array[low].num--;
+    } else if (keysize_array[high].element_size == value) {
+        keysize_array[high].num--;
+    } else {
+        while (low + 1 < high) {
+            int mid = low + (high - low) / 2;
+            if (value > keysize_array[mid].element_size) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        if (value == keysize_array[high].element_size) {
+            keysize_array[high].num--;
+        } else {
+            keysize_array[low].num--;
+        }
+    }
+}
+
+void increaseDataTypeArrayCurrentValue(keysizeInfo *keysize_array, int low, int high, int value) {
+    if (keysize_array[low].element_size == value) {
+        keysize_array[low].num++;
+    } else if (keysize_array[high].element_size == value) {
+        keysize_array[high].num++;
+    } else {
+        while (low + 1 < high) {
+            int mid = low + (high - low) / 2;
+            if (value > keysize_array[mid].element_size) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        if (value == keysize_array[high].element_size) {
+            keysize_array[high].num++;
+        } else {
+            keysize_array[low].num++;
+        }
+    }
+}
+
+void updateKeySizeArray(client *c, keysizeInfo *keysize_array, int length, long previous, long curr, char type) {
+    int low = 0;
+    int high = length - 1;
+    if (curr > keysize_array[high].element_size) {
+        scaleKeySizeArray(c, keysize_array, length, curr, type);
+        switch (type) {
+        case 'l': high = c->db->lists_array_length - 1; break;
+        case 'h': high = c->db->hashes_array_length - 1; break;
+        case 's': high = c->db->sets_array_length - 1; break;
+        case 'z': high = c->db->zsets_array_length - 1; break;
+        default: high = c->db->strings_array_length - 1; break;
+        }
+    }
+
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(keysize_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(keysize_array, low, high, curr);
+    }
+}
+
 /* Return the mean of all the samples. */
 long long getInstantaneousMetric(int metric) {
     int j;
@@ -2731,6 +2849,7 @@ void makeThreadKillable(void) {
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 }
 
+#define INIT_ARRAY_SIZE 3
 void initServer(void) {
     int j;
 
@@ -2822,6 +2941,35 @@ void initServer(void) {
         server.db[j].watched_keys = dictCreate(&keylistDictType);
         server.db[j].id = j;
         server.db[j].avg_ttl = 0;
+        server.db[j].lists_array_length = INIT_ARRAY_SIZE;
+        server.db[j].lists_number_of_elements = 0;
+        server.db[j].lists_array = zmalloc(sizeof(keysizeInfo) * INIT_ARRAY_SIZE);
+        server.db[j].sets_array_length = INIT_ARRAY_SIZE;
+        server.db[j].sets_number_of_elements = 0;
+        server.db[j].sets_array = zmalloc(sizeof(keysizeInfo) * INIT_ARRAY_SIZE);
+        server.db[j].hashes_array_length = INIT_ARRAY_SIZE;
+        server.db[j].hashes_number_of_elements = 0;
+        server.db[j].hashes_array = zmalloc(sizeof(keysizeInfo) * INIT_ARRAY_SIZE);
+        server.db[j].zsets_array_length = INIT_ARRAY_SIZE;
+        server.db[j].zsets_number_of_elements = 0;
+        server.db[j].zsets_array = zmalloc(sizeof(keysizeInfo) * INIT_ARRAY_SIZE);
+        server.db[j].strings_array_length = INIT_ARRAY_SIZE;
+        server.db[j].strings_number_of_elements = 0;
+        server.db[j].strings_array = zmalloc(sizeof(keysizeInfo) * INIT_ARRAY_SIZE);
+        int i = 1;
+        for (int count = 0; count < INIT_ARRAY_SIZE; count++) {
+            server.db[j].lists_array[count].element_size = i;
+            server.db[j].lists_array[count].num = 0;
+            server.db[j].sets_array[count].element_size = i;
+            server.db[j].sets_array[count].num = 0;
+            server.db[j].hashes_array[count].element_size = i;
+            server.db[j].hashes_array[count].num = 0;
+            server.db[j].zsets_array[count].element_size = i;
+            server.db[j].zsets_array[count].num = 0;
+            server.db[j].strings_array[count].element_size = i;
+            server.db[j].strings_array[count].num = 0;
+            i *= 2;
+        }
     }
     evictionPoolAlloc(); /* Initialize the LRU keys pool. */
     /* Note that server.pubsub_channels was chosen to be a kvstore (with only one dict, which
@@ -5553,6 +5701,7 @@ dict *genInfoSectionDict(robj **argv, int argc, char **defaults, int *out_all, i
         "errorstats",
         "cluster",
         "keyspace",
+        "keysizes",
         NULL,
     };
     if (!defaults) defaults = default_sections;
@@ -6203,6 +6352,41 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
             if (keys || vkeys) {
                 info = sdscatprintf(info, "db%d:keys=%lld,expires=%lld,avg_ttl=%lld\r\n", j, keys, vkeys,
                                     server.db[j].avg_ttl);
+            }
+        }
+    }
+
+    /* Key size distribution*/
+    if (all_sections || (dictFind(section_dict, "keysizes") != NULL)) {
+        if (sections++) info = sdscat(info, "\r\n");
+        info = sdscatprintf(info, "# Keysizes\r\n");
+        for (j = 0; j < server.dbnum; j++) {
+            if (server.db[j].lists_number_of_elements != 0) {
+                info = sdscatprintf(info, "db%d_distrib_strings_sizes:", j);
+                for (int l = 0; l < server.db[j].strings_array_length; l++) {
+                    info = sdscatprintf(info, "%ld=%ld,", server.db[j].strings_array[l].element_size, server.db[j].strings_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+                info = sdscatprintf(info, "db%d_distrib_lists_items:", j);
+                for (int l = 0; l < server.db[j].lists_array_length; l++) {
+                    info = sdscatprintf(info, "%ld=%ld,", server.db[j].lists_array[l].element_size, server.db[j].lists_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+                info = sdscatprintf(info, "db%d_distrib_sets_items:", j);
+                for (int l = 0; l < server.db[j].sets_array_length; l++) {
+                    info = sdscatprintf(info, "%ld=%ld,", server.db[j].sets_array[l].element_size, server.db[j].sets_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+                info = sdscatprintf(info, "db%d_distrib_hashes_items:", j);
+                for (int l = 0; l < server.db[j].hashes_array_length; l++) {
+                    info = sdscatprintf(info, "%ld=%ld,", server.db[j].hashes_array[l].element_size, server.db[j].hashes_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+                info = sdscatprintf(info, "db%d_distrib_zsets_items:", j);
+                for (int l = 0; l < server.db[j].zsets_array_length; l++) {
+                    info = sdscatprintf(info, "%ld=%ld,", server.db[j].zsets_array[l].element_size, server.db[j].zsets_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
             }
         }
     }
