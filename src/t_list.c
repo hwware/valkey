@@ -453,6 +453,47 @@ void listTypeDelRange(robj *subject, long start, long count) {
     }
 }
 
+void scaleListKeySizeArray(client *c, long value) {
+    int length = c->db->lists_array_length;
+    int high_bound = c->db->lists_array[length - 1].element_size;
+    int base = high_bound;
+    int count = 0;
+    while (high_bound < value) {
+        count++;
+        high_bound = high_bound * 2;
+    }
+    keysizeInfo *new_array = zmalloc(sizeof(keysizeInfo) * (count + length));
+    for (int i = 0; i < length; i++) {
+        new_array[i].element_size = c->db->lists_array[i].element_size;
+        new_array[i].num = c->db->lists_array[i].num;
+    }
+    for (int i = length; i < (count + length); i++) {
+        base *= 2;
+        new_array[i].element_size = base;
+        new_array[i].num = 0;
+    }
+    keysizeInfo *old_array = c->db->lists_array;
+    zfree(old_array);
+    c->db->lists_array = new_array;
+    c->db->lists_array_length = count + length;
+}
+
+void updateiListKeySizeArray(client *c, long previous, long curr) {
+    int low = 0;
+    int high = c->db->lists_array_length - 1;
+    if (curr > c->db->lists_array[high].element_size) {
+        scaleListKeySizeArray(c, curr);
+    }
+
+    high = c->db->lists_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(c->db->lists_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(c->db->lists_array, low, high, curr);
+    }
+}
+
 /*-----------------------------------------------------------------------------
  * List Commands
  *----------------------------------------------------------------------------*/
@@ -461,6 +502,8 @@ void listTypeDelRange(robj *subject, long start, long count) {
  * 'xx': push if key exists. */
 void pushGenericCommand(client *c, int where, int xx) {
     int j;
+    long previous_element_number;
+    long current_element_number;
 
     robj *lobj = lookupKeyWrite(c->db, c->argv[1]);
     if (checkType(c, lobj, OBJ_LIST)) return;
@@ -472,6 +515,10 @@ void pushGenericCommand(client *c, int where, int xx) {
 
         lobj = createListListpackObject();
         dbAdd(c->db, c->argv[1], &lobj);
+        previous_element_number = 0;
+        c->db->lists_number_of_elements++;
+    } else {
+        previous_element_number = listTypeLength(lobj);
     }
 
     listTypeTryConversionAppend(lobj, c->argv, 2, c->argc - 1, NULL, NULL);
@@ -481,6 +528,9 @@ void pushGenericCommand(client *c, int where, int xx) {
     }
 
     addReplyLongLong(c, listTypeLength(lobj));
+    current_element_number = listTypeLength(lobj);
+    //    displayUpdate(previous_element_number, current_element_number);
+    updateiListKeySizeArray(c, previous_element_number, current_element_number);
 
     char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
     signalModifiedKey(c, c->db, c->argv[1]);
@@ -514,6 +564,8 @@ void linsertCommand(client *c) {
     listTypeIterator *iter;
     listTypeEntry entry;
     int inserted = 0;
+    long previous_element_number;
+    long current_element_number;
 
     if (strcasecmp(c->argv[2]->ptr, "after") == 0) {
         where = LIST_TAIL;
@@ -532,7 +584,9 @@ void linsertCommand(client *c) {
      * the list twice (once to see if the value can be inserted and once
      * to do the actual insert), so we assume this value can be inserted
      * and convert the listpack to a regular list if necessary. */
+    previous_element_number = listTypeLength(subject);
     listTypeTryConversionAppend(subject, c->argv, 4, 4, NULL, NULL);
+
 
     /* Seek pivot from head to tail */
     iter = listTypeInitIterator(subject, 0, LIST_TAIL);
@@ -549,6 +603,8 @@ void linsertCommand(client *c) {
         signalModifiedKey(c, c->db, c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_LIST, "linsert", c->argv[1], c->db->id);
         server.dirty++;
+        current_element_number = previous_element_number + 1;
+        updateiListKeySizeArray(c, previous_element_number, current_element_number);
     } else {
         /* Notify client of a failed insert */
         addReplyLongLong(c, -1);
@@ -756,6 +812,8 @@ void popGenericCommand(client *c, int where) {
     int hascount = (c->argc == 3);
     long count = 0;
     robj *value;
+    long previous_element_number;
+    long current_element_number;
 
     if (c->argc > 3) {
         addReplyErrorArity(c);
@@ -774,6 +832,7 @@ void popGenericCommand(client *c, int where) {
         return;
     }
 
+    previous_element_number = listTypeLength(o);
     if (!count) {
         /* Pop a single element. This is POP's original behavior that replies
          * with a bulk string. */
@@ -782,10 +841,11 @@ void popGenericCommand(client *c, int where) {
         addReplyBulk(c, value);
         decrRefCount(value);
         listElementsRemoved(c, c->argv[1], where, o, 1, 1, NULL);
+        current_element_number = previous_element_number - 1;
     } else {
         /* Pop a range of elements. An addition to the original POP command,
          *  which replies with a multi-bulk. */
-        long llen = listTypeLength(o);
+        long llen = previous_element_number;
         long rangelen = (count > llen) ? llen : count;
         long rangestart = (where == LIST_HEAD) ? 0 : -rangelen;
         long rangeend = (where == LIST_HEAD) ? rangelen - 1 : -1;
@@ -794,7 +854,9 @@ void popGenericCommand(client *c, int where) {
         addListRangeReply(c, o, rangestart, rangeend, reverse);
         listTypeDelRange(o, rangestart, rangelen);
         listElementsRemoved(c, c->argv[1], where, o, rangelen, 1, NULL);
+        current_element_number = previous_element_number - rangelen;
     }
+    updateiListKeySizeArray(c, previous_element_number, current_element_number);
 }
 
 /* Like popGenericCommand but work with multiple keys.
@@ -864,6 +926,8 @@ void lrangeCommand(client *c) {
 void ltrimCommand(client *c) {
     robj *o;
     long start, end, llen, ltrim, rtrim;
+    long previous_element_number;
+    long current_element_number;
 
     if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != C_OK) ||
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK))
@@ -871,6 +935,7 @@ void ltrimCommand(client *c) {
 
     if ((o = lookupKeyWriteOrReply(c, c->argv[1], shared.ok)) == NULL || checkType(c, o, OBJ_LIST)) return;
     llen = listTypeLength(o);
+    previous_element_number = llen;
 
     /* convert negative indexes */
     if (start < 0) start = llen + start;
@@ -900,13 +965,15 @@ void ltrimCommand(client *c) {
         serverPanic("Unknown list encoding");
     }
 
+    current_element_number = listTypeLength(o);
     notifyKeyspaceEvent(NOTIFY_LIST, "ltrim", c->argv[1], c->db->id);
-    if (listTypeLength(o) == 0) {
+    if (current_element_number == 0) {
         dbDelete(c->db, c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id);
     } else {
         listTypeTryConversion(o, LIST_CONV_SHRINKING, NULL, NULL);
     }
+    updateiListKeySizeArray(c, previous_element_number, current_element_number);
     signalModifiedKey(c, c->db, c->argv[1]);
     server.dirty += (ltrim + rtrim);
     addReply(c, shared.ok);
@@ -1025,6 +1092,8 @@ void lremCommand(client *c) {
     obj = c->argv[3];
     long toremove;
     long removed = 0;
+    long previous_element_number;
+    long current_element_number;
 
     if (getRangeLongFromObjectOrReply(c, c->argv[2], -LONG_MAX, LONG_MAX, &toremove, NULL) != C_OK) return;
 
@@ -1039,6 +1108,8 @@ void lremCommand(client *c) {
         li = listTypeInitIterator(subject, 0, LIST_TAIL);
     }
 
+    previous_element_number = listTypeLength(subject);
+    current_element_number = previous_element_number;
     listTypeEntry entry;
     while (listTypeNext(li, &entry)) {
         if (listTypeEqual(&entry, obj)) {
@@ -1052,6 +1123,7 @@ void lremCommand(client *c) {
 
     if (removed) {
         notifyKeyspaceEvent(NOTIFY_LIST, "lrem", c->argv[1], c->db->id);
+        current_element_number = listTypeLength(subject);
         if (listTypeLength(subject) == 0) {
             dbDelete(c->db, c->argv[1]);
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id);
@@ -1059,6 +1131,7 @@ void lremCommand(client *c) {
             listTypeTryConversion(subject, LIST_CONV_SHRINKING, NULL, NULL);
         }
         signalModifiedKey(c, c->db, c->argv[1]);
+        updateiListKeySizeArray(c, previous_element_number, current_element_number);
     }
 
     addReplyLongLong(c, removed);
