@@ -1634,6 +1634,8 @@ void pfaddCommand(client *c) {
     robj *o = lookupKeyWrite(c->db, c->argv[1]);
     struct hllhdr *hdr;
     int updated = 0, j;
+    long previous_element_number;
+    long current_element_number;
 
     if (o == NULL) {
         /* Create the key with a string value of the exact length to
@@ -1642,9 +1644,12 @@ void pfaddCommand(client *c) {
         o = createHLLObject();
         dbAdd(c->db, c->argv[1], &o);
         updated++;
+        previous_element_number = 0;
+        c->db->string_number_of_keys++;
     } else {
         if (isHLLObjectOrReply(c, o) != C_OK) return;
         o = dbUnshareStringValue(c->db, c->argv[1], o);
+        previous_element_number = stringObjectLen(o);
     }
     /* Perform the low level ADD operation for every element. */
     for (j = 2; j < c->argc; j++) {
@@ -1660,6 +1665,8 @@ void pfaddCommand(client *c) {
         signalModifiedKey(c, c->db, c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_STRING, "pfadd", c->argv[1], c->db->id);
         server.dirty += updated;
+        current_element_number = stringObjectLen(o);
+        updateStringKeySizeArray(c->db, previous_element_number, current_element_number);
     }
     addReply(c, updated ? shared.cone : shared.czero);
 }
@@ -1766,6 +1773,8 @@ void pfmergeCommand(client *c) {
     struct hllhdr *hdr;
     int j;
     int use_dense = 0; /* Use dense representation as target? */
+    long previous_element_number;
+    long current_element_number;
 
     /* Compute an HLL with M[i] = MAX(M[i]_j).
      * We store the maximum into the max array of registers. We'll write
@@ -1798,10 +1807,13 @@ void pfmergeCommand(client *c) {
          * is guaranteed to return bytes initialized to zero. */
         o = createHLLObject();
         dbAdd(c->db, c->argv[1], &o);
+        previous_element_number = 0;
+        c->db->string_number_of_keys++;
     } else {
         /* If key exists we are sure it's of the right type/size
          * since we checked when merging the different HLLs, so we
          * don't check again. */
+        previous_element_number = stringObjectLen(o);
         o = dbUnshareStringValue(c->db, c->argv[1], o);
     }
 
@@ -1830,7 +1842,8 @@ void pfmergeCommand(client *c) {
     hdr = o->ptr; /* o->ptr may be different now, as a side effect of
                      last hllSparseSet() call. */
     HLL_INVALIDATE_CACHE(hdr);
-
+    current_element_number = stringObjectLen(o);
+    updateStringKeySizeArray(c->db, previous_element_number, current_element_number);
     signalModifiedKey(c, c->db, c->argv[1]);
     /* We generate a PFADD event for PFMERGE for semantical simplicity
      * since in theory this is a mass-add of elements. */

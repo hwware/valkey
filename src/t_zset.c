@@ -1726,6 +1726,8 @@ static void zaddGenericCommand(client *c, int flags) {
     robj *key = c->argv[1];
     robj *zobj;
     sds ele;
+    long previous_element_number = 0;
+    long current_element_number = 0;
     double score = 0, *scores = NULL;
     int j, elements, ch = 0;
     size_t maxelelen = 0;
@@ -1813,8 +1815,11 @@ static void zaddGenericCommand(client *c, int flags) {
         if (xx) goto reply_to_client; /* No key + XX option: nothing to do. */
         zobj = zsetTypeCreate(elements, maxelelen);
         dbAdd(c->db, key, &zobj);
+        previous_element_number = 0;
+        c->db->zset_number_of_keys++;
     } else {
         zsetTypeMaybeConvert(zobj, elements, maxelelen);
+        previous_element_number = zsetLength(zobj);
     }
 
     for (j = 0; j < elements; j++) {
@@ -1840,6 +1845,9 @@ static void zaddGenericCommand(client *c, int flags) {
         signalModifiedKey(c, c->db, key);
         notifyKeyspaceEvent(NOTIFY_ZSET, incr ? "zincr" : "zadd", key, c->db->id);
     }
+    server.dirty += (added + updated);
+    current_element_number = zsetLength(zobj);
+    updateZsetKeySizeArray(c->db, previous_element_number, current_element_number);
 
 reply_to_client:
     if (reply_err) {
@@ -1868,9 +1876,12 @@ void zremCommand(client *c) {
     robj *key = c->argv[1];
     robj *zobj;
     int deleted = 0, keyremoved = 0, j;
+    long previous_element_number;
+    long current_element_number;
 
     if ((zobj = lookupKeyWriteOrReply(c, key, shared.czero)) == NULL || checkType(c, zobj, OBJ_ZSET)) return;
 
+    previous_element_number = zsetLength(zobj);
     for (j = 2; j < c->argc; j++) {
         if (zsetDel(zobj, c->argv[j]->ptr)) deleted++;
         if (zsetLength(zobj) == 0) {
@@ -1882,9 +1893,14 @@ void zremCommand(client *c) {
 
     if (deleted) {
         notifyKeyspaceEvent(NOTIFY_ZSET, "zrem", key, c->db->id);
-        if (keyremoved) notifyKeyspaceEvent(NOTIFY_GENERIC, "del", key, c->db->id);
+        if (keyremoved) {
+            notifyKeyspaceEvent(NOTIFY_GENERIC, "del", key, c->db->id);
+            c->db->zset_number_of_keys--;
+        }
         signalModifiedKey(c, c->db, key);
         server.dirty += deleted;
+        current_element_number = previous_element_number - deleted;
+        updateZsetKeySizeArray(c->db, previous_element_number, current_element_number);
     }
     addReplyLongLong(c, deleted);
 }
@@ -1906,6 +1922,8 @@ void zremrangeGenericCommand(client *c, zrange_type rangetype) {
     zlexrangespec lexrange;
     long start, end, llen;
     char *notify_type = NULL;
+    long previous_element_number;
+    long current_element_number;
 
     /* Step 1: Parse the range. */
     if (rangetype == ZRANGE_RANK) {
@@ -1932,6 +1950,7 @@ void zremrangeGenericCommand(client *c, zrange_type rangetype) {
     /* Step 2: Lookup & range sanity checks if needed. */
     if ((zobj = lookupKeyWriteOrReply(c, key, shared.czero)) == NULL || checkType(c, zobj, OBJ_ZSET)) goto cleanup;
 
+    previous_element_number = zsetLength(zobj);
     if (rangetype == ZRANGE_RANK) {
         /* Sanitize indexes. */
         llen = zsetLength(zobj);
@@ -1982,8 +2001,13 @@ void zremrangeGenericCommand(client *c, zrange_type rangetype) {
     if (deleted) {
         signalModifiedKey(c, c->db, key);
         notifyKeyspaceEvent(NOTIFY_ZSET, notify_type, key, c->db->id);
-        if (keyremoved) notifyKeyspaceEvent(NOTIFY_GENERIC, "del", key, c->db->id);
+        if (keyremoved) {
+            notifyKeyspaceEvent(NOTIFY_GENERIC, "del", key, c->db->id);
+            c->db->zset_number_of_keys--;
+        }
         server.dirty += deleted;
+        current_element_number = previous_element_number - deleted;
+        updateZsetKeySizeArray(c->db, previous_element_number, current_element_number);
     }
     addReplyLongLong(c, deleted);
 
@@ -2745,6 +2769,7 @@ static void zunionInterDiffGenericCommand(client *c, robj *dstkey, int numkeysIn
     }
 
     if (dstkey) {
+        updateKeySizeArray(c->db, dstkey);
         if (dstzset->zsl->length) {
             zsetConvertToListpackIfNeeded(dstobj, maxelelen, totelelen);
             setKey(c, c->db, dstkey, &dstobj, 0);
@@ -2752,6 +2777,8 @@ static void zunionInterDiffGenericCommand(client *c, robj *dstkey, int numkeysIn
                                 dstkey, c->db->id);
             addReplyLongLong(c, zsetLength(dstobj));
             server.dirty++;
+            updateZsetKeySizeArray(c->db, 0, zsetLength(dstobj));
+            c->db->zset_number_of_keys++;
         } else {
             if (dbDelete(c->db, dstkey)) {
                 signalModifiedKey(c, c->db, dstkey);
@@ -2948,13 +2975,49 @@ static void zrangeResultEmitLongLongForStore(zrange_result_handler *handler, lon
 }
 
 static void zrangeResultFinalizeStore(zrange_result_handler *handler, size_t result_count) {
+    robj *dst_obj = lookupKeyWrite(handler->client->db, handler->dstkey);
+    unsigned int type = 10;
+    long previous = 0;
+    if (dst_obj) {
+        type = dst_obj->type;
+        if (type == OBJ_STRING) {
+            previous = stringObjectLen(dst_obj);
+        } else if (type == OBJ_LIST) {
+            previous = listTypeLength(dst_obj);
+        } else if (type == OBJ_SET) {
+            previous = setTypeSize(dst_obj);
+        } else if (type == OBJ_ZSET) {
+            previous = zsetLength(dst_obj);
+        } else if (type == OBJ_HASH) {
+            previous = hashTypeLength(dst_obj);
+        }
+    }
     if (result_count) {
+        updateKeySizeArray(handler->client->db, handler->dstkey);
         setKey(handler->client, handler->client->db, handler->dstkey, &handler->dstobj, 0);
         notifyKeyspaceEvent(NOTIFY_ZSET, "zrangestore", handler->dstkey, handler->client->db->id);
         server.dirty++;
         addReplyLongLong(handler->client, result_count);
+        updateZsetKeySizeArray(handler->client->db, zsetLength(handler->dstobj), 0);
+        handler->client->db->zset_number_of_keys++;
     } else {
         if (dbDelete(handler->client->db, handler->dstkey)) {
+            if (type == OBJ_STRING) {
+                updateStringKeySizeArray(handler->client->db, previous, 0);
+                handler->client->db->string_number_of_keys--;
+            } else if (type == OBJ_LIST) {
+                updateListKeySizeArray(handler->client->db, previous, 0);
+                handler->client->db->list_number_of_keys--;
+            } else if (type == OBJ_SET) {
+                updateSetKeySizeArray(handler->client->db, previous, 0);
+                handler->client->db->set_number_of_keys--;
+            } else if (type == OBJ_ZSET) {
+                updateZsetKeySizeArray(handler->client->db, previous, 0);
+                handler->client->db->zset_number_of_keys--;
+            } else if (type == OBJ_HASH) {
+                updateHashKeySizeArray(handler->client->db, previous, 0);
+                handler->client->db->hash_number_of_keys--;
+            }
             signalModifiedKey(handler->client, handler->client->db, handler->dstkey);
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", handler->dstkey, handler->client->db->id);
             server.dirty++;
@@ -3803,6 +3866,8 @@ void genericZpopCommand(client *c,
     robj *zobj = NULL;
     sds ele;
     double score;
+    long previous_element_number;
+    long current_element_number;
 
     if (deleted) *deleted = 0;
 
@@ -3839,6 +3904,7 @@ void genericZpopCommand(client *c,
 
     long llen = zsetLength(zobj);
     long rangelen = (count > llen) ? llen : count;
+    previous_element_number = llen;
 
     /* Remove the element. */
     do {
@@ -3896,6 +3962,7 @@ void genericZpopCommand(client *c,
         ++result_count;
     } while (--rangelen);
 
+    current_element_number = zsetLength(zobj);
     /* Remove the key, if indeed needed. */
     if (zsetLength(zobj) == 0) {
         if (deleted) *deleted = 1;
@@ -3904,6 +3971,7 @@ void genericZpopCommand(client *c,
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", key, c->db->id);
     }
     signalModifiedKey(c, c->db, key);
+    updateZsetKeySizeArray(c->db, previous_element_number, current_element_number);
 
     if (c->cmd->proc == zmpopCommand) {
         /* Always replicate it as ZPOP[MIN|MAX] with COUNT option instead of ZMPOP. */

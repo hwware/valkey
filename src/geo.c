@@ -705,7 +705,40 @@ void georadiusGeneric(client *c, int srcKeyIndex, int flags) {
     if (zobj == NULL) {
         if (storekey) {
             /* store key is not NULL, try to delete it and return 0. */
+            robj *store_obj = lookupKeyWrite(c->db, storekey);
+            unsigned int store_type = 10;
+            long pre_store_value = 0;
+            if (store_obj) {
+                store_type = store_obj->type;
+                if (store_type == OBJ_STRING) {
+                    pre_store_value = stringObjectLen(store_obj);
+                } else if (store_type == OBJ_LIST) {
+                    pre_store_value = listTypeLength(store_obj);
+                } else if (store_type == OBJ_SET) {
+                    pre_store_value = setTypeSize(store_obj);
+                } else if (store_type == OBJ_ZSET) {
+                    pre_store_value = zsetLength(store_obj);
+                } else if (store_type == OBJ_HASH) {
+                    pre_store_value = hashTypeLength(store_obj);
+                }
+            }
             if (dbDelete(c->db, storekey)) {
+                if (store_type == OBJ_STRING) {
+                    updateStringKeySizeArray(c->db, pre_store_value, 0);
+                    c->db->string_number_of_keys--;
+                } else if (store_type == OBJ_LIST) {
+                    updateListKeySizeArray(c->db, pre_store_value, 0);
+                    c->db->list_number_of_keys--;
+                } else if (store_type == OBJ_SET) {
+                    updateSetKeySizeArray(c->db, pre_store_value, 0);
+                    c->db->set_number_of_keys--;
+                } else if (store_type == OBJ_ZSET) {
+                    updateZsetKeySizeArray(c->db, pre_store_value, 0);
+                    c->db->zset_number_of_keys--;
+                } else if (store_type == OBJ_HASH) {
+                    updateHashKeySizeArray(c->db, pre_store_value, 0);
+                    c->db->hash_number_of_keys--;
+                }
                 signalModifiedKey(c, c->db, storekey);
                 notifyKeyspaceEvent(NOTIFY_GENERIC, "del", storekey, c->db->id);
                 server.dirty++;
@@ -828,12 +861,15 @@ void georadiusGeneric(client *c, int srcKeyIndex, int flags) {
             gp->member = NULL;
         }
 
+        updateKeySizeArray(c->db, storekey);
         if (returned_items) {
             zsetConvertToListpackIfNeeded(zobj, maxelelen, totelelen);
             setKey(c, c->db, storekey, &zobj, 0);
             notifyKeyspaceEvent(NOTIFY_ZSET, flags & GEOSEARCH ? "geosearchstore" : "georadiusstore", storekey,
                                 c->db->id);
             server.dirty += returned_items;
+            c->db->zset_number_of_keys++;
+            updateZsetKeySizeArray(c->db, 0, zsetLength(zobj));
         } else if (dbDelete(c->db, storekey)) {
             signalModifiedKey(c, c->db, storekey);
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", storekey, c->db->id);

@@ -3298,10 +3298,33 @@ int rdbLoadRioWithLoadingCtx(rio *rdb, int rdbflags, rdbSaveInfo *rsi, rdbLoadin
             should_expand_db = 0;
         }
 
+
         /* Read key */
         if ((key = rdbGenericLoadStringObject(rdb, RDB_LOAD_SDS, NULL)) == NULL) goto eoferr;
         /* Read value */
         val = rdbLoadObject(type, rdb, key, db->id, &error);
+
+        if (val != NULL) {
+            if (type == RDB_TYPE_STRING) {
+                db->string_number_of_keys++;
+                updateStringKeySizeArray(db, 0, stringObjectLen(val));
+            } else if (type == RDB_TYPE_SET || type == RDB_TYPE_SET_INTSET || type == RDB_TYPE_SET_LISTPACK) {
+                db->set_number_of_keys++;
+                updateSetKeySizeArray(db, 0, setTypeSize(val));
+            } else if (type == RDB_TYPE_LIST || type == RDB_TYPE_LIST_QUICKLIST ||
+                       type == RDB_TYPE_LIST_QUICKLIST_2 || type == RDB_TYPE_LIST_ZIPLIST) {
+                db->list_number_of_keys++;
+                updateListKeySizeArray(db, 0, listTypeLength(val));
+            } else if (type == RDB_TYPE_HASH || type == RDB_TYPE_HASH_ZIPMAP ||
+                       type == RDB_TYPE_HASH_ZIPLIST || type == RDB_TYPE_HASH_LISTPACK) {
+                db->hash_number_of_keys++;
+                updateHashKeySizeArray(db, 0, hashTypeLength(val));
+            } else if (type == RDB_TYPE_ZSET || type == RDB_TYPE_ZSET_2 ||
+                       type == RDB_TYPE_ZSET_ZIPLIST || type == RDB_TYPE_ZSET_LISTPACK) {
+                db->zset_number_of_keys++;
+                updateZsetKeySizeArray(db, 0, zsetLength(val));
+            }
+        }
 
         /* Check if the key already expired. This function is used when loading
          * an RDB file from disk, either at startup, or when an RDB was

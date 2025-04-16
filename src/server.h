@@ -831,9 +831,17 @@ typedef struct replBufBlock {
     char buf[];
 } replBufBlock;
 
+typedef struct keysizeInfo {
+    long long element_size;
+    long long num;
+} keysizeInfo;
+
 /* Database representation. There are multiple databases identified
  * by integers from 0 (the default database) up to the max configured
  * database. The database number is the 'id' field in the structure. */
+
+#define KEYSIZE_ARRAY_SIZE 32
+
 typedef struct serverDb {
     kvstore *keys;                        /* The keyspace for this DB */
     kvstore *expires;                     /* Timeout of keys with a timeout set */
@@ -846,6 +854,21 @@ typedef struct serverDb {
     int id;                               /* Database ID */
     long long avg_ttl;                    /* Average TTL, just for stats */
     unsigned long expires_cursor;         /* Cursor of the active expire cycle. */
+    keysizeInfo list_array[KEYSIZE_ARRAY_SIZE];
+    int list_array_length;
+    unsigned long long list_number_of_keys;
+    keysizeInfo set_array[KEYSIZE_ARRAY_SIZE];
+    int set_array_length;
+    unsigned long long set_number_of_keys;
+    keysizeInfo hash_array[KEYSIZE_ARRAY_SIZE];
+    int hash_array_length;
+    unsigned long long hash_number_of_keys;
+    keysizeInfo zset_array[KEYSIZE_ARRAY_SIZE];
+    int zset_array_length;
+    unsigned long long zset_number_of_keys;
+    keysizeInfo string_array[KEYSIZE_ARRAY_SIZE];
+    int string_array_length;
+    unsigned long long string_number_of_keys;
 } serverDb;
 
 /* forward declaration for functions ctx */
@@ -3266,6 +3289,17 @@ void *activeDefragAlloc(void *ptr);
 robj *activeDefragStringOb(robj *ob);
 void dismissSds(sds s);
 void dismissMemoryInChild(void);
+void displayUpdate(int pre_value, int current_value);
+void displayDataTypeArray(keysizeInfo *keysize_array, int length);
+void decreaseDataTypeArrayPreviousValue(keysizeInfo *keysize_array, int low, int high, int value);
+void increaseDataTypeArrayCurrentValue(keysizeInfo *keysize_array, int low, int high, int value);
+void updateHashKeySizeArray(serverDb *db, long previous, long curr);
+void updateStringKeySizeArray(serverDb *db, long previous, long curr);
+void updateListKeySizeArray(serverDb *db, long previous, long curr);
+void updateZsetKeySizeArray(serverDb *db, long previous, long curr);
+void updateSetKeySizeArray(serverDb *db, long previous, long curr);
+void updateKeySizeArray(serverDb *db, robj *key);
+void resetDBKeySizeArray(serverDb *db);
 
 #define RESTART_SERVER_NONE 0
 #define RESTART_SERVER_GRACEFULLY (1 << 0)     /* Do proper shutdown. */

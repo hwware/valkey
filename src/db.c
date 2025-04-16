@@ -722,6 +722,7 @@ void signalFlushedDb(int dbid, int async) {
 
     for (int j = startdb; j <= enddb; j++) {
         if (server.db[j] == NULL) continue;
+        resetDBKeySizeArray(server.db[j]);
         scanDatabaseForDeletedKeys(server.db[j], NULL);
         touchAllWatchedKeysInDb(server.db[j], NULL);
     }
@@ -822,11 +823,44 @@ void flushallCommand(client *c) {
 /* This command implements DEL and UNLINK. */
 void delGenericCommand(client *c, int lazy) {
     int numdel = 0, j;
+    unsigned int type = 10;
+    long previous = 0;
 
     for (j = 1; j < c->argc; j++) {
         if (expireIfNeeded(c->db, c->argv[j], NULL, 0) == KEY_DELETED) continue;
+        robj *t_obj = lookupKeyWrite(c->db, c->argv[j]);
+        if (t_obj) {
+            type = t_obj->type;
+            if (type == OBJ_STRING) {
+                previous = stringObjectLen(t_obj);
+            } else if (type == OBJ_LIST) {
+                previous = listTypeLength(t_obj);
+            } else if (type == OBJ_SET) {
+                previous = setTypeSize(t_obj);
+            } else if (type == OBJ_ZSET) {
+                previous = zsetLength(t_obj);
+            } else if (type == OBJ_HASH) {
+                previous = hashTypeLength(t_obj);
+            }
+        }
         int deleted = lazy ? dbAsyncDelete(c->db, c->argv[j]) : dbSyncDelete(c->db, c->argv[j]);
         if (deleted) {
+            if (type == OBJ_STRING) {
+                updateStringKeySizeArray(c->db, previous, 0);
+                c->db->string_number_of_keys--;
+            } else if (type == OBJ_LIST) {
+                updateListKeySizeArray(c->db, previous, 0);
+                c->db->list_number_of_keys--;
+            } else if (type == OBJ_SET) {
+                updateSetKeySizeArray(c->db, previous, 0);
+                c->db->set_number_of_keys--;
+            } else if (type == OBJ_ZSET) {
+                updateZsetKeySizeArray(c->db, previous, 0);
+                c->db->zset_number_of_keys--;
+            } else if (type == OBJ_HASH) {
+                updateHashKeySizeArray(c->db, previous, 0);
+                c->db->hash_number_of_keys--;
+            }
             signalModifiedKey(c, c->db, c->argv[j]);
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[j], c->db->id);
             server.dirty++;
@@ -1474,6 +1508,27 @@ void moveCommand(client *c) {
         return;
     }
 
+    robj *t_obj = lookupKeyWrite(src, c->argv[1]);
+    if (t_obj) {
+        if (t_obj->type == OBJ_STRING) {
+            updateStringKeySizeArray(dst, 0, stringObjectLen(t_obj));
+            dst->string_number_of_keys++;
+        } else if (t_obj->type == OBJ_LIST) {
+            updateListKeySizeArray(dst, 0, listTypeLength(t_obj));
+            dst->list_number_of_keys++;
+        } else if (t_obj->type == OBJ_SET) {
+            updateSetKeySizeArray(dst, 0, setTypeSize(t_obj));
+            dst->set_number_of_keys++;
+        } else if (t_obj->type == OBJ_ZSET) {
+            updateZsetKeySizeArray(dst, 0, zsetLength(t_obj));
+            dst->zset_number_of_keys++;
+        } else if (t_obj->type == OBJ_HASH) {
+            updateHashKeySizeArray(dst, 0, hashTypeLength(t_obj));
+            dst->hash_number_of_keys++;
+        } else if (t_obj->type == OBJ_STREAM) {
+        }
+    }
+    updateKeySizeArray(src, c->argv[1]);
     incrRefCount(o);           /* ref counter = 2 */
     dbDelete(src, c->argv[1]); /* ref counter = 1 */
 
@@ -1496,6 +1551,8 @@ void copyCommand(client *c) {
     int srcid, dbid;
     long long expire;
     int j, replace = 0, delete = 0;
+    // long previous_element_number = 0;
+    // long current_element_number = 0;
 
     /* Obtain source and target DB pointers
      * Default target DB is the same as the source DB
@@ -1544,7 +1601,8 @@ void copyCommand(client *c) {
 
     /* Return zero if the key already exists in the target DB.
      * If REPLACE option is selected, delete newkey from targetDB. */
-    if (lookupKeyWrite(dst, newkey) != NULL) {
+    robj *dstkey_obj = lookupKeyWrite(dst, newkey);
+    if (dstkey_obj != NULL) {
         if (replace) {
             delete = 1;
         } else {
@@ -1556,12 +1614,39 @@ void copyCommand(client *c) {
     /* Duplicate object according to object's type. */
     robj *newobj;
     switch (o->type) {
-    case OBJ_STRING: newobj = dupStringObject(o); break;
-    case OBJ_LIST: newobj = listTypeDup(o); break;
-    case OBJ_SET: newobj = setTypeDup(o); break;
-    case OBJ_ZSET: newobj = zsetDup(o); break;
-    case OBJ_HASH: newobj = hashTypeDup(o); break;
-    case OBJ_STREAM: newobj = streamDup(o); break;
+    case OBJ_STRING:
+        newobj = dupStringObject(o);
+        updateStringKeySizeArray(dst, 0, stringObjectLen(o));
+        // current_element_number = stringObjectLen(o);
+        dst->string_number_of_keys++;
+        break;
+    case OBJ_LIST:
+        newobj = listTypeDup(o);
+        updateListKeySizeArray(dst, 0, listTypeLength(o));
+        // current_element_number = listTypeLength(o);
+        dst->list_number_of_keys++;
+        break;
+    case OBJ_SET:
+        newobj = setTypeDup(o);
+        updateSetKeySizeArray(dst, 0, setTypeSize(o));
+        // current_element_number = setTypeSize(o);
+        dst->set_number_of_keys++;
+        break;
+    case OBJ_ZSET:
+        newobj = zsetDup(o);
+        updateZsetKeySizeArray(dst, 0, zsetLength(o));
+        // current_element_number = zsetLength(o);
+        dst->zset_number_of_keys++;
+        break;
+    case OBJ_HASH:
+        newobj = hashTypeDup(o);
+        updateHashKeySizeArray(dst, 0, hashTypeLength(o));
+        // current_element_number = hashTypeLength(o);
+        dst->hash_number_of_keys++;
+        break;
+    case OBJ_STREAM:
+        newobj = streamDup(o);
+        break;
     case OBJ_MODULE:
         newobj = moduleTypeDupOrReply(c, key, newkey, dst->id, o);
         if (!newobj) return;
@@ -1570,6 +1655,28 @@ void copyCommand(client *c) {
     }
 
     if (delete) {
+        switch (dstkey_obj->type) {
+        case OBJ_STRING:
+            updateStringKeySizeArray(dst, stringObjectLen(dstkey_obj), 0);
+            dst->string_number_of_keys--;
+            break;
+        case OBJ_LIST:
+            updateListKeySizeArray(dst, listTypeLength(dstkey_obj), 0);
+            dst->list_number_of_keys--;
+            break;
+        case OBJ_SET:
+            updateSetKeySizeArray(dst, setTypeSize(dstkey_obj), 0);
+            dst->set_number_of_keys--;
+            break;
+        case OBJ_ZSET:
+            updateZsetKeySizeArray(dst, zsetLength(dstkey_obj), 0);
+            dst->zset_number_of_keys--;
+            break;
+        case OBJ_HASH:
+            updateHashKeySizeArray(dst, hashTypeLength(dstkey_obj), 0);
+            dst->hash_number_of_keys--;
+            break;
+        }
         dbDelete(dst, newkey);
     }
 
@@ -1667,6 +1774,32 @@ int dbSwapDatabases(int id1, int id2) {
     db2->expires = aux.expires;
     db2->avg_ttl = aux.avg_ttl;
     db2->expires_cursor = aux.expires_cursor;
+
+
+    for (int count = 0; count < aux.list_array_length; count++) {
+        db2->list_array[count].element_size = db1->list_array[count].element_size;
+        db2->list_array[count].num = db1->list_array[count].num;
+        db2->set_array[count].element_size = db1->set_array[count].element_size;
+        db2->set_array[count].num = db1->set_array[count].num;
+        db2->hash_array[count].element_size = db1->hash_array[count].element_size;
+        db2->hash_array[count].num = db1->hash_array[count].num;
+        db2->zset_array[count].element_size = db1->zset_array[count].element_size;
+        db2->zset_array[count].num = db1->zset_array[count].num;
+        db2->string_array[count].element_size = db1->string_array[count].element_size;
+        db2->string_array[count].num = db1->string_array[count].num;
+    }
+
+    db2->list_number_of_keys = db1->list_number_of_keys;
+    db2->list_array_length = db1->list_array_length;
+    db2->set_number_of_keys = db1->set_number_of_keys;
+    db2->set_array_length = db1->set_array_length;
+    db2->hash_number_of_keys = db1->hash_number_of_keys;
+    db2->hash_array_length = db1->hash_array_length;
+    db2->zset_number_of_keys = db1->zset_number_of_keys;
+    db2->zset_array_length = db1->zset_array_length;
+    db2->string_number_of_keys = db1->string_number_of_keys;
+    db2->string_array_length = db1->string_array_length;
+    resetDBKeySizeArray(db1);
 
     /* Now we need to handle clients blocked on lists: as an effect
      * of swapping the two DBs, a client that was waiting for list

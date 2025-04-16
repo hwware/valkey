@@ -888,6 +888,139 @@ void trackInstantaneousMetric(int metric, long long current_value, long long cur
     server.inst_metric[metric].last_sample_value = current_value;
 }
 
+void displayUpdate(int pre_value, int current_value) {
+    serverLog(LL_WARNING, "This is for testing, previous item number is %d, and current item number is %d", pre_value, current_value);
+}
+
+void displayDataTypeArray(keysizeInfo *keysize_array, int length) {
+    serverLog(LL_WARNING, "Current array length is %d", length);
+    for (int i = 0; i < length; i++) {
+        serverLog(LL_WARNING, "Item %lld and value is %lld", keysize_array[i].element_size, keysize_array[i].num);
+    }
+}
+
+void decreaseDataTypeArrayPreviousValue(keysizeInfo *keysize_array, int low, int high, int value) {
+    if (keysize_array[low].element_size == value) {
+        keysize_array[low].num--;
+    } else if (keysize_array[high].element_size == value) {
+        keysize_array[high].num--;
+    } else {
+        while (low + 1 < high) {
+            int mid = low + (high - low) / 2;
+            if (value > keysize_array[mid].element_size) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        if (value == keysize_array[high].element_size) {
+            keysize_array[high].num--;
+        } else {
+            keysize_array[low].num--;
+        }
+    }
+}
+
+void increaseDataTypeArrayCurrentValue(keysizeInfo *keysize_array, int low, int high, int value) {
+    if (keysize_array[low].element_size == value) {
+        keysize_array[low].num++;
+    } else if (keysize_array[high].element_size == value) {
+        keysize_array[high].num++;
+    } else {
+        while (low + 1 < high) {
+            int mid = low + (high - low) / 2;
+            if (value > keysize_array[mid].element_size) {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        if (value == keysize_array[high].element_size) {
+            keysize_array[high].num++;
+        } else {
+            keysize_array[low].num++;
+        }
+    }
+}
+
+void updateHashKeySizeArray(serverDb *db, long previous, long curr) {
+    int low = 0;
+    int high = db->hash_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(db->hash_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(db->hash_array, low, high, curr);
+    }
+}
+
+void updateListKeySizeArray(serverDb *db, long previous, long curr) {
+    int low = 0;
+    int high = db->list_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(db->list_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(db->list_array, low, high, curr);
+    }
+}
+
+void updateSetKeySizeArray(serverDb *db, long previous, long curr) {
+    int low = 0;
+    int high = db->set_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(db->set_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(db->set_array, low, high, curr);
+    }
+}
+
+void updateStringKeySizeArray(serverDb *db, long previous, long curr) {
+    int low = 0;
+    int high = db->string_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(db->string_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(db->string_array, low, high, curr);
+    }
+}
+
+void updateZsetKeySizeArray(serverDb *db, long previous, long curr) {
+    int low = 0;
+    int high = db->zset_array_length - 1;
+    if (previous != 0) {
+        decreaseDataTypeArrayPreviousValue(db->zset_array, low, high, previous);
+    }
+    if (curr != 0) {
+        increaseDataTypeArrayCurrentValue(db->zset_array, low, high, curr);
+    }
+}
+
+void updateKeySizeArray(serverDb *db, robj *dstkey) {
+    robj *t_obj = lookupKeyWrite(db, dstkey);
+    if (t_obj) {
+        if (t_obj->type == OBJ_STRING) {
+            updateStringKeySizeArray(db, stringObjectLen(t_obj), 0);
+            db->string_number_of_keys--;
+        } else if (t_obj->type == OBJ_LIST) {
+            updateListKeySizeArray(db, listTypeLength(t_obj), 0);
+            db->list_number_of_keys--;
+        } else if (t_obj->type == OBJ_SET) {
+            updateSetKeySizeArray(db, setTypeSize(t_obj), 0);
+            db->set_number_of_keys--;
+        } else if (t_obj->type == OBJ_ZSET) {
+            updateZsetKeySizeArray(db, zsetLength(t_obj), 0);
+            db->zset_number_of_keys--;
+        } else if (t_obj->type == OBJ_HASH) {
+            updateHashKeySizeArray(db, hashTypeLength(t_obj), 0);
+            db->hash_number_of_keys--;
+        } else if (t_obj->type == OBJ_STREAM) {
+        }
+    }
+}
+
 /* Return the mean of all the samples. */
 long long getInstantaneousMetric(int metric) {
     int j;
@@ -2772,6 +2905,21 @@ bool dbsHaveNoKeys(void) {
     return true;
 }
 
+void resetDBKeySizeArray(serverDb *db) {
+    db->string_number_of_keys = 0;
+    db->list_number_of_keys = 0;
+    db->set_number_of_keys = 0;
+    db->hash_number_of_keys = 0;
+    db->zset_number_of_keys = 0;
+    for (int count = 0; count < KEYSIZE_ARRAY_SIZE; count++) {
+        db->list_array[count].num = 0;
+        db->set_array[count].num = 0;
+        db->hash_array[count].num = 0;
+        db->zset_array[count].num = 0;
+        db->string_array[count].num = 0;
+    }
+}
+
 serverDb *createDatabase(int id) {
     int slot_count_bits = 0;
     int flags = KVSTORE_ALLOCATE_HASHTABLES_ON_DEMAND;
@@ -2790,6 +2938,21 @@ serverDb *createDatabase(int id) {
     db->watched_keys = dictCreate(&keylistDictType);
     db->id = id;
     db->avg_ttl = 0;
+    db->list_array_length = KEYSIZE_ARRAY_SIZE;
+    db->set_array_length = KEYSIZE_ARRAY_SIZE;
+    db->hash_array_length = KEYSIZE_ARRAY_SIZE;
+    db->zset_array_length = KEYSIZE_ARRAY_SIZE;
+    db->string_array_length = KEYSIZE_ARRAY_SIZE;
+    long long i = 1;
+    for (int count = 0; count < KEYSIZE_ARRAY_SIZE; count++) {
+        db->list_array[count].element_size = i;
+        db->set_array[count].element_size = i;
+        db->hash_array[count].element_size = i;
+        db->zset_array[count].element_size = i;
+        db->string_array[count].element_size = i;
+        i *= 2;
+    }
+    resetDBKeySizeArray(db);
     return db;
 }
 
@@ -5661,6 +5824,7 @@ dict *genInfoSectionDict(robj **argv, int argc, char **defaults, int *out_all, i
         "errorstats",
         "cluster",
         "keyspace",
+        "keysizes",
         NULL,
     };
     if (!defaults) defaults = default_sections;
@@ -6317,6 +6481,57 @@ sds genValkeyInfoString(dict *section_dict, int all_sections, int everything) {
             }
         }
     }
+
+    /* Key size distribution*/
+
+    if (all_sections || (dictFind(section_dict, "keysizes") != NULL)) {
+        if (sections++) info = sdscat(info, "\r\n");
+        info = sdscatprintf(info, "# Keysizes\r\n");
+        for (j = 0; j < server.dbnum; j++) {
+            if (server.db[j] == NULL) continue;
+            if (server.db[j]->string_number_of_keys != 0) {
+                info = sdscatprintf(info, "db%d_distrib_string_sizes:", j);
+                for (int l = 0; l < server.db[j]->string_array_length; l++) {
+                    if (server.db[j]->string_array[l].num == 0) continue;
+                    info = sdscatprintf(info, "%lld=%lld,", server.db[j]->string_array[l].element_size, server.db[j]->string_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+            }
+            if (server.db[j]->list_number_of_keys != 0) {
+                info = sdscatprintf(info, "db%d_distrib_list_items:", j);
+                for (int l = 0; l < server.db[j]->list_array_length; l++) {
+                    if (server.db[j]->list_array[l].num == 0) continue;
+                    info = sdscatprintf(info, "%lld=%lld,", server.db[j]->list_array[l].element_size, server.db[j]->list_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+            }
+            if (server.db[j]->set_number_of_keys != 0) {
+                info = sdscatprintf(info, "db%d_distrib_set_items:", j);
+                for (int l = 0; l < server.db[j]->set_array_length; l++) {
+                    if (server.db[j]->set_array[l].num == 0) continue;
+                    info = sdscatprintf(info, "%lld=%lld,", server.db[j]->set_array[l].element_size, server.db[j]->set_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+            }
+            if (server.db[j]->hash_number_of_keys != 0) {
+                info = sdscatprintf(info, "db%d_distrib_hash_items:", j);
+                for (int l = 0; l < server.db[j]->hash_array_length; l++) {
+                    if (server.db[j]->hash_array[l].num == 0) continue;
+                    info = sdscatprintf(info, "%lld=%lld,", server.db[j]->hash_array[l].element_size, server.db[j]->hash_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+            }
+            if (server.db[j]->zset_number_of_keys != 0) {
+                info = sdscatprintf(info, "db%d_distrib_zset_items:", j);
+                for (int l = 0; l < server.db[j]->zset_array_length; l++) {
+                    if (server.db[j]->zset_array[l].num == 0) continue;
+                    info = sdscatprintf(info, "%lld=%lld,", server.db[j]->zset_array[l].element_size, server.db[j]->zset_array[l].num);
+                }
+                info = sdscatprintf(info, "\r\n");
+            }
+        }
+    }
+
 
     /* Get info from modules.
      * Returned when the user asked for "everything", "modules", or a specific module section.

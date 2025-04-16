@@ -576,15 +576,51 @@ void sortCommandGeneric(client *c, int readonly) {
                 }
             }
         }
+        robj *dst_obj = lookupKeyWrite(c->db, storekey);
+        unsigned int type = 10;
+        long previous = 0;
+        if (dst_obj) {
+            type = dst_obj->type;
+            if (type == OBJ_LIST) {
+                previous = listTypeLength(dst_obj);
+            } else if (type == OBJ_SET) {
+                previous = setTypeSize(dst_obj);
+            } else if (type == OBJ_ZSET) {
+                previous = zsetLength(dst_obj);
+            }
+        }
+
         if (outputlen) {
             listTypeTryConversion(sobj, LIST_CONV_AUTO, NULL, NULL);
             setKey(c, c->db, storekey, &sobj, 0);
+            if (type == OBJ_LIST) {
+                updateListKeySizeArray(c->db, previous, 0);
+                c->db->list_number_of_keys--;
+            } else if (type == OBJ_SET) {
+                updateSetKeySizeArray(c->db, previous, 0);
+                c->db->set_number_of_keys--;
+            } else if (type == OBJ_ZSET) {
+                updateZsetKeySizeArray(c->db, previous, 0);
+                c->db->zset_number_of_keys--;
+            }
+            updateListKeySizeArray(c->db, 0, listTypeLength(sobj));
+            c->db->list_number_of_keys++;
             /* Ownership of sobj transferred to the db. Set to NULL to prevent
              * freeing it below. */
             sobj = NULL;
             notifyKeyspaceEvent(NOTIFY_LIST, "sortstore", storekey, c->db->id);
             server.dirty += outputlen;
         } else if (dbDelete(c->db, storekey)) {
+            if (type == OBJ_LIST) {
+                updateListKeySizeArray(c->db, previous, 0);
+                c->db->list_number_of_keys--;
+            } else if (type == OBJ_SET) {
+                updateSetKeySizeArray(c->db, previous, 0);
+                c->db->set_number_of_keys--;
+            } else if (type == OBJ_ZSET) {
+                updateZsetKeySizeArray(c->db, previous, 0);
+                c->db->zset_number_of_keys--;
+            }
             signalModifiedKey(c, c->db, storekey);
             notifyKeyspaceEvent(NOTIFY_GENERIC, "del", storekey, c->db->id);
             server.dirty++;

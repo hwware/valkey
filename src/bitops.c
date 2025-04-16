@@ -637,7 +637,7 @@ int getBitfieldTypeFromArgument(client *c, robj *o, int *sign, int *bits) {
  * so that the 'maxbit' bit can be addressed. The object is finally
  * returned. Otherwise if the key holds a wrong type NULL is returned and
  * an error is sent to the client. */
-robj *lookupStringForBitCommand(client *c, uint64_t maxbit, int *dirty) {
+robj *lookupStringForBitCommand(client *c, uint64_t maxbit, int *dirty, int *create) {
     size_t byte = maxbit >> 3;
     robj *o = lookupKeyWrite(c->db, c->argv[1]);
     if (checkType(c, o, OBJ_STRING)) return NULL;
@@ -647,11 +647,13 @@ robj *lookupStringForBitCommand(client *c, uint64_t maxbit, int *dirty) {
         o = createObject(OBJ_STRING, sdsnewlen(NULL, byte + 1));
         dbAdd(c->db, c->argv[1], &o);
         if (dirty) *dirty = 1;
+        *create = 1;
     } else {
         o = dbUnshareStringValue(c->db, c->argv[1], o);
         size_t oldlen = sdslen(o->ptr);
         o->ptr = sdsgrowzero(o->ptr, byte + 1);
         if (dirty && oldlen != sdslen(o->ptr)) *dirty = 1;
+        *create = 0;
     }
     return o;
 }
@@ -695,6 +697,8 @@ void setbitCommand(client *c) {
     ssize_t byte, bit;
     int byteval, bitval;
     long on;
+    long previous_str_len;
+    long curr_str_len;
 
     if (getBitOffsetFromArgument(c, c->argv[2], &bitoffset, 0, 0) != C_OK) return;
 
@@ -707,7 +711,14 @@ void setbitCommand(client *c) {
     }
 
     int dirty;
-    if ((o = lookupStringForBitCommand(c, bitoffset, &dirty)) == NULL) return;
+    int justCreated;
+    if ((o = lookupStringForBitCommand(c, bitoffset, &dirty, &justCreated)) == NULL) return;
+    if (justCreated) {
+        previous_str_len = 0;
+        c->db->string_number_of_keys++;
+    } else {
+        previous_str_len = stringObjectLen(o);
+    }
 
     /* Get current values */
     byte = bitoffset >> 3;
@@ -727,7 +738,8 @@ void setbitCommand(client *c) {
         notifyKeyspaceEvent(NOTIFY_STRING, "setbit", c->argv[1], c->db->id);
         server.dirty++;
     }
-
+    curr_str_len = stringObjectLen(o);
+    updateStringKeySizeArray(c->db, previous_str_len, curr_str_len);
     /* Return original value. */
     addReply(c, bitval ? shared.cone : shared.czero);
 }
@@ -930,10 +942,13 @@ void bitopCommand(client *c) {
 
     /* Store the computed value into the target key */
     if (maxlen) {
+        updateKeySizeArray(c->db, targetkey);
         o = createObject(OBJ_STRING, res);
         setKey(c, c->db, targetkey, &o, 0);
         notifyKeyspaceEvent(NOTIFY_STRING, "set", targetkey, c->db->id);
         server.dirty++;
+        updateStringKeySizeArray(c->db, 0, stringObjectLen(o));
+        c->db->string_number_of_keys++;
     } else if (dbDelete(c->db, targetkey)) {
         signalModifiedKey(c, c->db, targetkey);
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", targetkey, c->db->id);
@@ -1215,6 +1230,10 @@ void bitfieldGeneric(client *c, int flags) {
     int owtype = BFOVERFLOW_WRAP;  /* Overflow type. */
     int readonly = 1;
     uint64_t highest_write_offset = 0;
+    long previous_str_len = 0;
+    long curr_str_len = 0;
+    int justCreated = 0;
+
 
     for (j = 2; j < c->argc; j++) {
         int remargs = c->argc - j - 1;  /* Remaining args other than current. */
@@ -1302,9 +1321,13 @@ void bitfieldGeneric(client *c, int flags) {
 
         /* Lookup by making room up to the farthest bit reached by
          * this operation. */
-        if ((o = lookupStringForBitCommand(c, highest_write_offset, &dirty)) == NULL) {
+        if ((o = lookupStringForBitCommand(c, highest_write_offset, &dirty, &justCreated)) == NULL) {
             zfree(ops);
             return;
+        } else if (justCreated) {
+            previous_str_len = 0;
+        } else {
+            previous_str_len = stringObjectLen(o);
         }
     }
 
@@ -1416,6 +1439,11 @@ void bitfieldGeneric(client *c, int flags) {
     }
 
     if (changes) {
+        if (justCreated) {
+            c->db->string_number_of_keys++;
+        }
+        curr_str_len = stringObjectLen(o);
+        updateStringKeySizeArray(c->db, previous_str_len, curr_str_len);
         signalModifiedKey(c, c->db, c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_STRING, "setbit", c->argv[1], c->db->id);
         server.dirty += changes;

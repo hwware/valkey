@@ -206,6 +206,7 @@ void restoreCommand(client *c) {
     rio payload;
     int j, type, replace = 0, absttl = 0;
     robj *obj;
+    robj *pre_obj;
 
     /* Parse additional options */
     for (j = 4; j < c->argc; j++) {
@@ -237,7 +238,8 @@ void restoreCommand(client *c) {
 
     /* Make sure this key does not already exist here... */
     robj *key = c->argv[1];
-    if (!replace && lookupKeyWrite(c->db, key) != NULL) {
+    pre_obj = lookupKeyWrite(c->db, key);
+    if (!replace && pre_obj != NULL) {
         addReplyErrorObject(c, shared.busykeyerr);
         return;
     }
@@ -265,7 +267,44 @@ void restoreCommand(client *c) {
 
     /* Remove the old key if needed. */
     int deleted = 0;
+    unsigned int pre_type = 10;
+    long previous = 0;
+
+    if (pre_obj) {
+        pre_type = pre_obj->type;
+        if (pre_type == OBJ_STRING) {
+            previous = stringObjectLen(pre_obj);
+        } else if (pre_type == OBJ_LIST) {
+            previous = listTypeLength(pre_obj);
+        } else if (pre_type == OBJ_SET) {
+            previous = setTypeSize(pre_obj);
+        } else if (pre_type == OBJ_ZSET) {
+            previous = zsetLength(pre_obj);
+        } else if (pre_type == OBJ_HASH) {
+            previous = hashTypeLength(pre_obj);
+        }
+    }
+
     if (replace) deleted = dbDelete(c->db, key);
+
+    if (deleted) {
+        if (pre_type == OBJ_STRING) {
+            updateStringKeySizeArray(c->db, previous, 0);
+            c->db->string_number_of_keys--;
+        } else if (pre_type == OBJ_LIST) {
+            updateListKeySizeArray(c->db, previous, 0);
+            c->db->list_number_of_keys--;
+        } else if (pre_type == OBJ_SET) {
+            updateSetKeySizeArray(c->db, previous, 0);
+            c->db->set_number_of_keys--;
+        } else if (pre_type == OBJ_ZSET) {
+            updateZsetKeySizeArray(c->db, previous, 0);
+            c->db->zset_number_of_keys--;
+        } else if (pre_type == OBJ_HASH) {
+            updateHashKeySizeArray(c->db, previous, 0);
+            c->db->hash_number_of_keys--;
+        }
+    }
 
     if (ttl && !absttl) ttl += commandTimeSnapshot();
     if (ttl && checkAlreadyExpired(ttl)) {
@@ -300,6 +339,10 @@ void restoreCommand(client *c) {
     notifyKeyspaceEvent(NOTIFY_GENERIC, "restore", key, c->db->id);
     addReply(c, shared.ok);
     server.dirty++;
+    if (!obj) {
+        c->db->list_number_of_keys++;
+        updateListKeySizeArray(c->db, 0, listTypeLength(obj));
+    }
 }
 /* MIGRATE socket cache implementation.
  *
