@@ -524,8 +524,8 @@ void linsertCommand(client *c) {
         return;
     }
 
-    if ((subject = lookupKeyWriteOrReply(c, c->argv[1], shared.czero)) == NULL || checkType(c, subject, OBJ_LIST))
-        return;
+    subject = lookupKeyWriteOrReply(c, c->argv[1], shared.czero);
+    if (subject == NULL || checkType(c, subject, OBJ_LIST)) return;
 
     /* We're not sure if this value can be inserted yet, but we cannot
      * convert the list inside the iterator. We don't want to loop over
@@ -857,7 +857,8 @@ void lrangeCommand(client *c) {
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK))
         return;
 
-    if ((o = lookupKeyReadOrReply(c, c->argv[1], shared.emptyarray)) == NULL || checkType(c, o, OBJ_LIST)) return;
+    o = lookupKeyReadOrReply(c, c->argv[1], shared.emptyarray);
+    if (o == NULL || checkType(c, o, OBJ_LIST)) return;
 
     addListRangeReply(c, o, start, end, 0);
 }
@@ -871,7 +872,9 @@ void ltrimCommand(client *c) {
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK))
         return;
 
-    if ((o = lookupKeyWriteOrReply(c, c->argv[1], shared.ok)) == NULL || checkType(c, o, OBJ_LIST)) return;
+    o = lookupKeyWriteOrReply(c, c->argv[1], shared.ok);
+    if (o == NULL || checkType(c, o, OBJ_LIST)) return;
+
     llen = listTypeLength(o);
 
     /* convert negative indexes */
@@ -971,14 +974,8 @@ void lposCommand(client *c) {
 
     /* We return NULL or an empty array if there is no such key (or
      * if we find no matches, depending on the presence of the COUNT option. */
-    if ((o = lookupKeyRead(c->db, c->argv[1])) == NULL) {
-        if (count != -1)
-            addReply(c, shared.emptyarray);
-        else
-            addReply(c, shared.null[c->resp]);
-        return;
-    }
-    if (checkType(c, o, OBJ_LIST)) return;
+    o = lookupKeyReadOrReply(c, c->argv[1], count != -1 ? shared.emptyarray : shared.null[c->resp]);
+    if (o == NULL || checkType(c, o, OBJ_LIST)) return;
 
     /* If we got the COUNT option, prepare to emit an array. */
     void *arraylenptr = NULL;
@@ -1103,8 +1100,9 @@ robj *getStringObjectFromListPosition(int position) {
 
 void lmoveGenericCommand(client *c, int wherefrom, int whereto) {
     robj *sobj, *value;
-    if ((sobj = lookupKeyWriteOrReply(c, c->argv[1], shared.null[c->resp])) == NULL || checkType(c, sobj, OBJ_LIST))
-        return;
+    sobj = lookupKeyWriteOrReply(c, c->argv[1], shared.null[c->resp]);
+    if (sobj == NULL || checkType(c, sobj, OBJ_LIST)) return;
+
 
     if (listTypeLength(sobj) == 0) {
         /* This may only happen after loading very old RDB files. Recent
