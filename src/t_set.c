@@ -1404,7 +1404,8 @@ void sinterGenericCommand(client *c,
     zfree(sets);
 }
 
-/* SINTER key [key ...] */
+/* SINTER key [key ...] and SMEMBERS key */
+/* Both commands call this function */
 void sinterCommand(client *c) {
     sinterGenericCommand(c, c->argv + 1, c->argc - 1, NULL, 0, 0);
 }
