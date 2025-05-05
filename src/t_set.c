@@ -1268,7 +1268,7 @@ void sinterGenericCommand(client *c,
             /* A NULL is considered an empty set */
             empty += 1;
             sets[j] = NULL;
-            continue;
+            break;
         }
         if (checkType(c, setobj, OBJ_SET)) {
             zfree(sets);
