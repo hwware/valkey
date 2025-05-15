@@ -2851,6 +2851,7 @@ void freeClientMultiState(client *c);
 void queueMultiCommand(client *c, uint64_t cmd_flags);
 size_t multiStateMemOverhead(client *c);
 void touchWatchedKey(serverDb *db, robj *key);
+void touchWatchedKeyWithIndex(serverDb *db, robj *key, int index);
 int isWatchedKeyExpired(client *c);
 void touchAllWatchedKeysInDb(serverDb *emptied, serverDb *replaced_with);
 void discardTransaction(client *c);
@@ -3242,6 +3243,7 @@ int calculateKeySlot(sds key);
 int dbExpand(serverDb *db, uint64_t db_size, int try_expand);
 int dbExpandExpires(serverDb *db, uint64_t db_size, int try_expand);
 robj *dbFind(serverDb *db, sds key);
+robj *dbFindWithIndex(serverDb *db, sds key, int index);
 robj *dbFindExpires(serverDb *db, sds key);
 unsigned long long dbSize(serverDb *db);
 unsigned long long dbScan(serverDb *db, unsigned long long cursor, hashtableScanFunction scan_cb, void *privdata);
@@ -3417,10 +3419,12 @@ robj *setExpire(client *c, serverDb *db, robj *key, long long when);
 int checkAlreadyExpired(long long when);
 robj *lookupKeyRead(serverDb *db, robj *key);
 robj *lookupKeyWrite(serverDb *db, robj *key);
+robj *lookupKeyWriteWithIndex(serverDb *db, robj *key, int index);
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply);
 robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply);
 robj *lookupKeyReadWithFlags(serverDb *db, robj *key, int flags);
 robj *lookupKeyWriteWithFlags(serverDb *db, robj *key, int flags);
+robj *lookupKeyWriteWithFlagsWithIndex(serverDb *db, robj *key, int flags, int index);
 robj *objectCommandLookup(client *c, robj *key);
 robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply);
 int objectSetLRUOrLFU(robj *val, long long lfu_freq, long long lru_idle, long long lru_clock, int lru_multiplier);
@@ -3434,6 +3438,7 @@ int objectSetLRUOrLFU(robj *val, long long lfu_freq, long long lru_idle, long lo
     (LOOKUP_NONOTIFY | LOOKUP_NOSTATS | LOOKUP_NOTOUCH | LOOKUP_NOEXPIRE) /* Avoid any effects from fetching the key */
 
 void dbAdd(serverDb *db, robj *key, robj **valref);
+void dbAddWithIndex(serverDb *db, robj *key, robj **valref, int index);
 int dbAddRDBLoad(serverDb *db, sds key, robj **valref);
 void dbReplaceValue(serverDb *db, robj *key, robj **valref);
 
@@ -3460,6 +3465,7 @@ serverDb *initTempDb(void);
 void discardTempDb(serverDb *tempDb);
 int selectDb(client *c, int id);
 void signalModifiedKey(client *c, serverDb *db, robj *key);
+void signalModifiedKeyWithIndex(client *c, serverDb *db, robj *key, int index);
 void signalFlushedDb(int dbid, int async);
 void scanGenericCommand(client *c, robj *o, unsigned long long cursor);
 int parseScanCursorOrReply(client *c, sds buf, unsigned long long *cursor);

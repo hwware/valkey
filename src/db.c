@@ -148,6 +148,57 @@ robj *lookupKey(serverDb *db, robj *key, int flags) {
     return val;
 }
 
+
+robj *lookupKeyWithIndex(serverDb *db, robj *key, int flags, int index) {
+    int dict_index = index;
+    robj *val = dbFindWithDictIndex(db, key->ptr, dict_index);
+    if (val) {
+        /* Forcing deletion of expired keys on a replica makes the replica
+         * inconsistent with the primary. We forbid it on readonly replicas, but
+         * we have to allow it on writable replicas to make write commands
+         * behave consistently.
+         *
+         * It's possible that the WRITE flag is set even during a readonly
+         * command, since the command may trigger events that cause modules to
+         * perform additional writes. */
+        int is_ro_replica = server.primary_host && server.repl_replica_ro;
+        int expire_flags = 0;
+        if (flags & LOOKUP_WRITE && !is_ro_replica) expire_flags |= EXPIRE_FORCE_DELETE_EXPIRED;
+        if (flags & LOOKUP_NOEXPIRE) expire_flags |= EXPIRE_AVOID_DELETE_EXPIRED;
+        if (expireIfNeededWithDictIndex(db, key, val, expire_flags, dict_index) != KEY_VALID) {
+            /* The key is no longer valid. */
+            val = NULL;
+        }
+    }
+
+    if (val) {
+        /* Update the access time for the ageing algorithm.
+         * Don't do it if we have a saving child, as this will trigger
+         * a copy on write madness. */
+        if (server.current_client && server.current_client->flag.no_touch &&
+            server.executing_client->cmd->proc != touchCommand)
+            flags |= LOOKUP_NOTOUCH;
+        if (!hasActiveChildProcess() && !(flags & LOOKUP_NOTOUCH)) {
+            /* Shared objects can't be stored in the database. */
+            serverAssert(val->refcount != OBJ_SHARED_REFCOUNT);
+            if (server.maxmemory_policy & MAXMEMORY_FLAG_LFU) {
+                updateLFU(val);
+            } else {
+                val->lru = LRU_CLOCK();
+            }
+        }
+
+        if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE))) server.stat_keyspace_hits++;
+        /* TODO: Use separate hits stats for WRITE */
+    } else {
+        if (!(flags & (LOOKUP_NONOTIFY | LOOKUP_WRITE))) notifyKeyspaceEvent(NOTIFY_KEY_MISS, "keymiss", key, db->id);
+        if (!(flags & (LOOKUP_NOSTATS | LOOKUP_WRITE))) server.stat_keyspace_misses++;
+        /* TODO: Use separate misses stats and notify event for WRITE */
+    }
+
+    return val;
+}
+
 /* Lookup a key for read operations, or return NULL if the key is not found
  * in the specified DB.
  *
@@ -194,6 +245,14 @@ robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply) {
     return o;
 }
 
+robj *lookupKeyWriteWithIndex(serverDb *db, robj *key, int dict_index) {
+    return lookupKeyWriteWithFlagsWithIndex(db, key, LOOKUP_NONE, dict_index);
+}
+
+robj *lookupKeyWriteWithFlagsWithIndex(serverDb *db, robj *key, int flags, int dict_index) {
+    return lookupKeyWithIndex(db, key, flags | LOOKUP_WRITE, dict_index);
+}
+
 /* Add a key-value entry to the DB.
  *
  * A copy of 'key' is stored in the database. The caller must ensure the
@@ -233,8 +292,35 @@ static void dbAddInternal(serverDb *db, robj *key, robj **valref, int update_if_
     *valref = val;
 }
 
+static void dbAddInternalWithIndex(serverDb *db, robj *key, robj **valref, int update_if_existing, int index) {
+    int dict_index = index;
+    void **oldref = NULL;
+    if (update_if_existing) {
+        oldref = kvstoreHashtableFindRef(db->keys, dict_index, key->ptr);
+        if (oldref != NULL) {
+            dbSetValue(db, key, valref, 1, oldref);
+            return;
+        }
+    } else {
+        debugServerAssertWithInfo(NULL, key, kvstoreHashtableFindRef(db->keys, dict_index, key->ptr) == NULL);
+    }
+
+    /* Not existing. Convert val to valkey object and insert. */
+    robj *val = *valref;
+    val = objectSetKeyAndExpire(val, key->ptr, -1);
+    initObjectLRUOrLFU(val);
+    kvstoreHashtableAdd(db->keys, dict_index, val);
+    signalKeyAsReady(db, key, val->type);
+    notifyKeyspaceEvent(NOTIFY_NEW, "new", key, db->id);
+    *valref = val;
+}
+
 void dbAdd(serverDb *db, robj *key, robj **valref) {
     dbAddInternal(db, key, valref, 0);
+}
+
+void dbAddWithIndex(serverDb *db, robj *key, robj **valref, int index) {
+    dbAddInternalWithIndex(db, key, valref, 0, index);
 }
 
 /* Returns which dict index should be used with kvstore for a given key. */
@@ -708,6 +794,11 @@ long long dbTotalServerKeyCount(void) {
  * a context of a client. */
 void signalModifiedKey(client *c, serverDb *db, robj *key) {
     touchWatchedKey(db, key);
+    trackingInvalidateKey(c, key, 1);
+}
+
+void signalModifiedKeyWithIndex(client *c, serverDb *db, robj *key, int index) {
+    touchWatchedKeyWithIndex(db, key, index);
     trackingInvalidateKey(c, key, 1);
 }
 
@@ -2088,6 +2179,11 @@ static robj *dbFindExpiresWithDictIndex(serverDb *db, sds key, int dict_index) {
     void *existing = NULL;
     kvstoreHashtableFind(db->expires, dict_index, key, &existing);
     return existing;
+}
+
+robj *dbFindWithIndex(serverDb *db, sds key, int index) {
+    int dict_index = index;
+    return dbFindWithDictIndex(db, key, dict_index);
 }
 
 robj *dbFindExpires(serverDb *db, sds key) {

@@ -462,7 +462,8 @@ void listTypeDelRange(robj *subject, long start, long count) {
 void pushGenericCommand(client *c, int where, int xx) {
     int j;
 
-    robj *lobj = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *lobj = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, lobj, OBJ_LIST)) return;
     if (!lobj) {
         if (xx) {
@@ -471,7 +472,7 @@ void pushGenericCommand(client *c, int where, int xx) {
         }
 
         lobj = createListListpackObject();
-        dbAdd(c->db, c->argv[1], &lobj);
+        dbAddWithIndex(c->db, c->argv[1], &lobj, dict_index);
     }
 
     listTypeTryConversionAppend(lobj, c->argv, 2, c->argc - 1, NULL, NULL);
@@ -480,7 +481,7 @@ void pushGenericCommand(client *c, int where, int xx) {
         server.dirty++;
     }
 
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
     notifyKeyspaceEvent(NOTIFY_LIST, event, c->argv[1], c->db->id);
 
