@@ -3422,6 +3422,7 @@ robj *lookupKeyWrite(serverDb *db, robj *key);
 robj *lookupKeyWriteWithIndex(serverDb *db, robj *key, int index);
 robj *lookupKeyReadOrReply(client *c, robj *key, robj *reply);
 robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply);
+robj *lookupKeyWriteOrReplyWithIndex(client *c, robj *key, robj *reply, int index);
 robj *lookupKeyReadWithFlags(serverDb *db, robj *key, int flags);
 robj *lookupKeyWriteWithFlags(serverDb *db, robj *key, int flags);
 robj *lookupKeyWriteWithFlagsWithIndex(serverDb *db, robj *key, int flags, int index);

@@ -245,6 +245,12 @@ robj *lookupKeyWriteOrReply(client *c, robj *key, robj *reply) {
     return o;
 }
 
+robj *lookupKeyWriteOrReplyWithIndex(client *c, robj *key, robj *reply, int index) {
+    robj *o = lookupKeyWriteWithIndex(c->db, key, index);
+    if (!o) addReplyOrErrorObject(c, reply);
+    return o;
+}
+
 robj *lookupKeyWriteWithIndex(serverDb *db, robj *key, int dict_index) {
     return lookupKeyWriteWithFlagsWithIndex(db, key, LOOKUP_NONE, dict_index);
 }
