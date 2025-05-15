@@ -639,13 +639,14 @@ int getBitfieldTypeFromArgument(client *c, robj *o, int *sign, int *bits) {
  * an error is sent to the client. */
 robj *lookupStringForBitCommand(client *c, uint64_t maxbit, int *dirty) {
     size_t byte = maxbit >> 3;
-    robj *o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, o, OBJ_STRING)) return NULL;
     if (dirty) *dirty = 0;
 
     if (o == NULL) {
         o = createObject(OBJ_STRING, sdsnewlen(NULL, byte + 1));
-        dbAdd(c->db, c->argv[1], &o);
+        dbAddWithIndex(c->db, c->argv[1], &o, dict_index);
         if (dirty) *dirty = 1;
     } else {
         o = dbUnshareStringValue(c->db, c->argv[1], o);
