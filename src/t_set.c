@@ -598,12 +598,13 @@ void saddCommand(client *c) {
     robj *set;
     int j, added = 0;
 
-    set = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    set = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, set, OBJ_SET)) return;
 
     if (set == NULL) {
         set = setTypeCreate(c->argv[2]->ptr, c->argc - 2);
-        dbAdd(c->db, c->argv[1], &set);
+        dbAddWithIndex(c->db, c->argv[1], &set, dict_index);
     } else {
         setTypeMaybeConvert(set, c->argc - 2);
     }
@@ -612,7 +613,7 @@ void saddCommand(client *c) {
         if (setTypeAdd(set, c->argv[j]->ptr)) added++;
     }
     if (added) {
-        signalModifiedKey(c, c->db, c->argv[1]);
+        signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
         notifyKeyspaceEvent(NOTIFY_SET, "sadd", c->argv[1], c->db->id);
         server.dirty += added;
     }
