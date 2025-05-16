@@ -58,6 +58,7 @@ static keyStatus expireIfNeeded(serverDb *db, robj *key, robj *val, int flags);
 static int keyIsExpiredWithDictIndex(serverDb *db, robj *key, int dict_index);
 static int objectIsExpired(robj *val);
 static void dbSetValue(serverDb *db, robj *key, robj **valref, int overwrite, void **oldref);
+static void dbSetValueWithIndex(serverDb *db, robj *key, robj **valref, int overwrite, void **oldref, int index);
 static int getKVStoreIndexForKey(sds key);
 static robj *dbFindWithDictIndex(serverDb *db, sds key, int dict_index);
 static robj *dbFindExpiresWithDictIndex(serverDb *db, sds key, int dict_index);
@@ -478,6 +479,72 @@ static void dbSetValue(serverDb *db, robj *key, robj **valref, int overwrite, vo
     *valref = new;
 }
 
+static void dbSetValueWithIndex(serverDb *db, robj *key, robj **valref, int overwrite, void **oldref, int index) {
+    robj *val = *valref;
+    if (oldref == NULL) {
+        int dict_index = index;
+        oldref = kvstoreHashtableFindRef(db->keys, dict_index, key->ptr);
+    }
+    serverAssertWithInfo(NULL, key, oldref != NULL);
+    robj *old = *oldref;
+    robj *new;
+
+    if (overwrite) {
+        /* VM_StringDMA may call dbUnshareStringValue which may free val, so we
+         * need to incr to retain old */
+        incrRefCount(old);
+        /* Although the key is not really deleted from the database, we regard
+         * overwrite as two steps of unlink+add, so we still need to call the unlink
+         * callback of the module. */
+        moduleNotifyKeyUnlink(key, old, db->id, DB_FLAG_KEY_OVERWRITE);
+        /* We want to try to unblock any module clients or clients using a blocking XREADGROUP */
+        signalDeletedKeyAsReady(db, key, old->type);
+        decrRefCount(old);
+        /* Because of VM_StringDMA, old may be changed, so we need get old again */
+        old = *oldref;
+    }
+
+    if ((old->refcount == 1 && old->encoding != OBJ_ENCODING_EMBSTR) &&
+        (val->refcount == 1 && val->encoding != OBJ_ENCODING_EMBSTR)) {
+        /* Keep old object in the database. Just swap it's ptr, type and
+         * encoding with the content of val. */
+        int tmp_type = old->type;
+        int tmp_encoding = old->encoding;
+        void *tmp_ptr = old->ptr;
+        old->type = val->type;
+        old->encoding = val->encoding;
+        old->ptr = val->ptr;
+        val->type = tmp_type;
+        val->encoding = tmp_encoding;
+        val->ptr = tmp_ptr;
+        /* Set new to old to keep the old object. Set old to val to be freed below. */
+        new = old;
+        old = val;
+    } else {
+        /* Replace the old value at its location in the key space. */
+        val->lru = old->lru;
+        long long expire = objectGetExpire(old);
+        new = objectSetKeyAndExpire(val, key->ptr, expire);
+        *oldref = new;
+        /* Replace the old value at its location in the expire space. */
+        if (expire >= 0) {
+            int dict_index = index;
+            void **expireref = kvstoreHashtableFindRef(db->expires, dict_index, key->ptr);
+            serverAssert(expireref != NULL);
+            *expireref = new;
+        }
+    }
+    /* For efficiency, let the I/O thread that allocated an object also deallocate it. */
+    if (tryOffloadFreeObjToIOThreads(old) == C_OK) {
+        /* OK */
+    } else if (server.lazyfree_lazy_server_del) {
+        freeObjAsync(key, old, db->id);
+    } else {
+        decrRefCount(old);
+    }
+    *valref = new;
+}
+
 /* Replace an existing key with a new value, we just replace value and don't
  * emit any events */
 void dbReplaceValue(serverDb *db, robj *key, robj **valref) {
@@ -518,6 +585,27 @@ void setKey(client *c, serverDb *db, robj *key, robj **valref, int flags) {
     }
     if (!(flags & SETKEY_KEEPTTL)) removeExpire(db, key);
     if (!(flags & SETKEY_NO_SIGNAL)) signalModifiedKey(c, db, key);
+}
+
+void setKeyWithIndex(client *c, serverDb *db, robj *key, robj **valref, int flags, int index) {
+    int keyfound = 0;
+
+    if (flags & SETKEY_ALREADY_EXIST)
+        keyfound = 1;
+    else if (flags & SETKEY_ADD_OR_UPDATE)
+        keyfound = -1;
+    else if (!(flags & SETKEY_DOESNT_EXIST))
+        keyfound = (lookupKeyWriteWithIndex(db, key, index) != NULL);
+
+    if (!keyfound) {
+        dbAddWithIndex(db, key, valref, index);
+    } else if (keyfound < 0) {
+        dbAddInternalWithIndex(db, key, valref, 1, index);
+    } else {
+        dbSetValueWithIndex(db, key, valref, 1, NULL, index);
+    }
+    if (!(flags & SETKEY_KEEPTTL)) removeExpireWithIndex(db, key, index);
+    if (!(flags & SETKEY_NO_SIGNAL)) signalModifiedKeyWithIndex(c, db, key, index);
 }
 
 /* Return a random key, in form of an Object.
@@ -599,6 +687,11 @@ int dbGenericDeleteWithDictIndex(serverDb *db, robj *key, int async, int flags, 
 /* Helper for sync and async delete. */
 int dbGenericDelete(serverDb *db, robj *key, int async, int flags) {
     int dict_index = getKVStoreIndexForKey(key->ptr);
+    return dbGenericDeleteWithDictIndex(db, key, async, flags, dict_index);
+}
+
+int dbGenericDeleteWithIndex(serverDb *db, robj *key, int async, int flags, int index) {
+    int dict_index = index;
     return dbGenericDeleteWithDictIndex(db, key, async, flags, dict_index);
 }
 
@@ -1851,6 +1944,19 @@ int removeExpire(serverDb *db, robj *key) {
     return 0;
 }
 
+int removeExpireWithIndex(serverDb *db, robj *key, int index) {
+    int dict_index = index;
+    void *popped;
+    if (kvstoreHashtablePop(db->expires, dict_index, key->ptr, &popped)) {
+        robj *val = popped;
+        robj *newval = objectSetExpire(val, -1);
+        serverAssert(newval == val);
+        debugServerAssert(getExpire(db, key) == -1);
+        return 1;
+    }
+    return 0;
+}
+
 /* Set an expire to the specified key. If the expire is set in the context
  * of an user calling a command 'c' is the client, otherwise 'c' is set
  * to NULL. The 'when' parameter is the absolute unix time in milliseconds
@@ -1863,6 +1969,39 @@ robj *setExpire(client *c, serverDb *db, robj *key, long long when) {
      * expire in an robj, it's potentially reallocated. We need to updates the
      * pointer(s) to it. */
     int dict_index = getKVStoreIndexForKey(key->ptr);
+    void **valref = kvstoreHashtableFindRef(db->keys, dict_index, key->ptr);
+    serverAssertWithInfo(NULL, key, valref != NULL);
+    val = *valref;
+    long long old_when = objectGetExpire(val);
+    robj *newval = objectSetExpire(val, when);
+    if (old_when != -1) {
+        /* Val already had an expire field, so it was not reallocated. */
+        serverAssert(newval == val);
+        /* It already exists in set of keys with expire. */
+        debugServerAssert(!kvstoreHashtableAdd(db->expires, dict_index, newval));
+    } else {
+        /* No old expire. Update the pointer in the keys hashtable, if needed,
+         * and add it to the expires hashtable. */
+        if (newval != val) {
+            val = *valref = newval;
+        }
+        int added = kvstoreHashtableAdd(db->expires, dict_index, newval);
+        serverAssert(added);
+    }
+
+    int writable_replica = server.primary_host && server.repl_replica_ro == 0;
+    if (c && writable_replica && !c->flag.primary) rememberReplicaKeyWithExpire(db, key);
+    return val;
+}
+
+robj *setExpireWithIndex(client *c, serverDb *db, robj *key, long long when, int index) {
+    /* TODO: Add val as a parameter to this function, to avoid looking it up. */
+    robj *val;
+
+    /* Reuse the object from the main dict in the expire dict. When setting
+     * expire in an robj, it's potentially reallocated. We need to updates the
+     * pointer(s) to it. */
+    int dict_index = index;
     void **valref = kvstoreHashtableFindRef(db->keys, dict_index, key->ptr);
     serverAssertWithInfo(NULL, key, valref != NULL);
     val = *valref;
@@ -1933,6 +2072,19 @@ void deleteExpiredKeyFromOverwriteAndPropagate(client *c, robj *keyobj) {
     robj *aux = server.lazyfree_lazy_expire ? shared.unlink : shared.del;
     rewriteClientCommandVector(c, 2, aux, keyobj);
     signalModifiedKey(c, c->db, keyobj);
+    notifyKeyspaceEvent(NOTIFY_EXPIRED, "expired", keyobj, c->db->id);
+    server.stat_expiredkeys++;
+}
+
+void deleteExpiredKeyFromOverwriteAndPropagateWithIndex(client *c, robj *keyobj, int index) {
+    int deleted = dbGenericDeleteWithIndex(c->db, keyobj, server.lazyfree_lazy_expire, DB_FLAG_KEY_EXPIRED, index);
+    serverAssertWithInfo(c, keyobj, deleted);
+    server.dirty++;
+
+    /* Replicate/AOF this as an explicit DEL or UNLINK. */
+    robj *aux = server.lazyfree_lazy_expire ? shared.unlink : shared.del;
+    rewriteClientCommandVector(c, 2, aux, keyobj);
+    signalModifiedKeyWithIndex(c, c->db, keyobj, index);
     notifyKeyspaceEvent(NOTIFY_EXPIRED, "expired", keyobj, c->db->id);
     server.stat_expiredkeys++;
 }

@@ -110,7 +110,8 @@ void setGenericCommand(client *c,
         if (getGenericCommand(c) == C_ERR) goto cleanup;
     }
 
-    robj *existing_value = lookupKeyWrite(c->db, key);
+    int dict_index = server.cluster_enabled ? getKeySlot(key->ptr) : 0;
+    robj *existing_value = lookupKeyWriteWithIndex(c->db, key, dict_index);
     found = existing_value != NULL;
 
     /* Handle the IFEQ conditional check */
@@ -143,7 +144,7 @@ void setGenericCommand(client *c,
      * database, and then wait for the active expire to delete it, it is wasteful.
      * If the key already exists, delete it. */
     if (expire && checkAlreadyExpired(milliseconds)) {
-        if (found) deleteExpiredKeyFromOverwriteAndPropagate(c, key);
+        if (found) deleteExpiredKeyFromOverwriteAndPropagateWithIndex(c, key, dict_index);
         if (!(flags & OBJ_SET_GET)) addReply(c, shared.ok);
         goto cleanup;
     }
@@ -153,8 +154,8 @@ void setGenericCommand(client *c,
     setkey_flags |= ((flags & OBJ_KEEPTTL) || expire) ? SETKEY_KEEPTTL : 0;
     setkey_flags |= found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
 
-    setKey(c, c->db, key, &val, setkey_flags);
-    if (expire) val = setExpire(c, c->db, key, milliseconds);
+    setKeyWithIndex(c, c->db, key, &val, setkey_flags, dict_index);
+    if (expire) val = setExpireWithIndex(c, c->db, key, milliseconds, dict_index);
 
     /* By setting the reallocated value back into argv, we can avoid duplicating
      * a large string value when adding it to the db. */

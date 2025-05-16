@@ -3410,12 +3410,15 @@ int setModuleNumericConfig(ModuleConfig *config, long long val, const char **err
 
 /* db.c -- Keyspace access API */
 int removeExpire(serverDb *db, robj *key);
+int removeExpireWithIndex(serverDb *db, robj *key, int index);
 void deleteExpiredKeyAndPropagate(serverDb *db, robj *keyobj);
 void deleteExpiredKeyFromOverwriteAndPropagate(client *c, robj *keyobj);
+void deleteExpiredKeyFromOverwriteAndPropagateWithIndex(client *c, robj *keyobj, int index);
 void propagateDeletion(serverDb *db, robj *key, int lazy);
 int keyIsExpired(serverDb *db, robj *key);
 long long getExpire(serverDb *db, robj *key);
 robj *setExpire(client *c, serverDb *db, robj *key, long long when);
+robj *setExpireWithIndex(client *c, serverDb *db, robj *key, long long when, int index);
 int checkAlreadyExpired(long long when);
 robj *lookupKeyRead(serverDb *db, robj *key);
 robj *lookupKeyWrite(serverDb *db, robj *key);
@@ -3449,8 +3452,10 @@ void dbReplaceValue(serverDb *db, robj *key, robj **valref);
 #define SETKEY_DOESNT_EXIST 8
 #define SETKEY_ADD_OR_UPDATE 16 /* Key most likely doesn't exists */
 void setKey(client *c, serverDb *db, robj *key, robj **valref, int flags);
+void setKeyWithIndex(client *c, serverDb *db, robj *key, robj **valref, int flags, int index);
 robj *dbRandomKey(serverDb *db);
 int dbGenericDelete(serverDb *db, robj *key, int async, int flags);
+int dbGenericDeleteWithIndex(serverDb *db, robj *key, int async, int flags, int index);
 int dbSyncDelete(serverDb *db, robj *key);
 int dbDelete(serverDb *db, robj *key);
 robj *dbUnshareStringValue(serverDb *db, robj *key, robj *o);
