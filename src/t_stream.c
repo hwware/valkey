@@ -1833,7 +1833,8 @@ size_t streamReplyWithRangeFromConsumerPEL(client *c,
 /* Look the stream at 'key' and return the corresponding stream object.
  * The function creates a key setting it to an empty stream if needed. */
 robj *streamTypeLookupWriteOrCreate(client *c, robj *key, int no_create) {
-    robj *o = lookupKeyWrite(c->db, key);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *o = lookupKeyWriteWithIndex(c->db, key, dict_index);
     if (checkType(c, o, OBJ_STREAM)) return NULL;
     if (o == NULL) {
         if (no_create) {
@@ -1841,7 +1842,7 @@ robj *streamTypeLookupWriteOrCreate(client *c, robj *key, int no_create) {
             return NULL;
         }
         o = createStreamObject();
-        dbAdd(c->db, key, &o);
+        dbAddWithIndex(c->db, key, &o, dict_index);
     }
     return o;
 }

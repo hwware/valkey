@@ -110,7 +110,8 @@ void setGenericCommand(client *c,
         if (getGenericCommand(c) == C_ERR) goto cleanup;
     }
 
-    robj *existing_value = lookupKeyWrite(c->db, key);
+    int dict_index = server.cluster_enabled ? getKeySlot(key->ptr) : 0;
+    robj *existing_value = lookupKeyWriteWithIndex(c->db, key, dict_index);
     found = existing_value != NULL;
 
     /* Handle the IFEQ conditional check */
@@ -143,7 +144,7 @@ void setGenericCommand(client *c,
      * database, and then wait for the active expire to delete it, it is wasteful.
      * If the key already exists, delete it. */
     if (expire && checkAlreadyExpired(milliseconds)) {
-        if (found) deleteExpiredKeyFromOverwriteAndPropagate(c, key);
+        if (found) deleteExpiredKeyFromOverwriteAndPropagateWithIndex(c, key, dict_index);
         if (!(flags & OBJ_SET_GET)) addReply(c, shared.ok);
         goto cleanup;
     }
@@ -153,8 +154,8 @@ void setGenericCommand(client *c,
     setkey_flags |= ((flags & OBJ_KEEPTTL) || expire) ? SETKEY_KEEPTTL : 0;
     setkey_flags |= found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
 
-    setKey(c, c->db, key, &val, setkey_flags);
-    if (expire) val = setExpire(c, c->db, key, milliseconds);
+    setKeyWithIndex(c, c->db, key, &val, setkey_flags, dict_index);
+    if (expire) val = setExpireWithIndex(c, c->db, key, milliseconds, dict_index);
 
     /* By setting the reallocated value back into argv, we can avoid duplicating
      * a large string value when adding it to the db. */
@@ -537,7 +538,8 @@ void setrangeCommand(client *c) {
         return;
     }
 
-    o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (o == NULL) {
         /* Return 0 when setting nothing on a non-existing string */
         if (sdslen(value) == 0) {
@@ -550,7 +552,7 @@ void setrangeCommand(client *c) {
             return;
 
         o = createObject(OBJ_STRING, sdsnewlen(NULL, offset + sdslen(value)));
-        dbAdd(c->db, c->argv[1], &o);
+        dbAddWithIndex(c->db, c->argv[1], &o, dict_index);
     } else {
         size_t olen;
 
@@ -575,7 +577,7 @@ void setrangeCommand(client *c) {
 
     o->ptr = sdsgrowzero(o->ptr, offset + sdslen(value));
     memcpy((char *)o->ptr + offset, value, sdslen(value));
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     notifyKeyspaceEvent(NOTIFY_STRING, "setrange", c->argv[1], c->db->id);
     server.dirty++;
     addReplyLongLong(c, sdslen(o->ptr));
@@ -686,7 +688,8 @@ void incrDecrCommand(client *c, long long incr) {
     long long value, oldvalue;
     robj *o, *new;
 
-    o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, o, OBJ_STRING)) return;
     if (getLongLongFromObjectOrReply(c, o, &value, NULL) != C_OK) return;
 
@@ -707,10 +710,10 @@ void incrDecrCommand(client *c, long long incr) {
         if (o) {
             dbReplaceValue(c->db, c->argv[1], &new);
         } else {
-            dbAdd(c->db, c->argv[1], &new);
+            dbAddWithIndex(c->db, c->argv[1], &new, dict_index);
         }
     }
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     notifyKeyspaceEvent(NOTIFY_STRING, "incrby", c->argv[1], c->db->id);
     server.dirty++;
     addReplyLongLong(c, value);
@@ -747,7 +750,8 @@ void incrbyfloatCommand(client *c) {
     long double incr, value;
     robj *o, *new;
 
-    o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, o, OBJ_STRING)) return;
     if (getLongDoubleFromObjectOrReply(c, o, &value, NULL) != C_OK ||
         getLongDoubleFromObjectOrReply(c, c->argv[2], &incr, NULL) != C_OK)
@@ -762,8 +766,8 @@ void incrbyfloatCommand(client *c) {
     if (o)
         dbReplaceValue(c->db, c->argv[1], &new);
     else
-        dbAdd(c->db, c->argv[1], &new);
-    signalModifiedKey(c, c->db, c->argv[1]);
+        dbAddWithIndex(c->db, c->argv[1], &new, dict_index);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     notifyKeyspaceEvent(NOTIFY_STRING, "incrbyfloat", c->argv[1], c->db->id);
     server.dirty++;
     addReplyBulk(c, new);
@@ -780,11 +784,12 @@ void appendCommand(client *c) {
     size_t totlen;
     robj *o, *append;
 
-    o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (o == NULL) {
         /* Create the key */
         c->argv[2] = tryObjectEncoding(c->argv[2]);
-        dbAdd(c->db, c->argv[1], &c->argv[2]);
+        dbAddWithIndex(c->db, c->argv[1], &c->argv[2], dict_index);
         incrRefCount(c->argv[2]);
         totlen = stringObjectLen(c->argv[2]);
     } else {
@@ -802,7 +807,7 @@ void appendCommand(client *c) {
         o->ptr = sdscatlen(o->ptr, append->ptr, sdslen(append->ptr));
         totlen = sdslen(o->ptr);
     }
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     notifyKeyspaceEvent(NOTIFY_STRING, "append", c->argv[1], c->db->id);
     server.dirty++;
     addReplyLongLong(c, totlen);

@@ -1631,7 +1631,8 @@ invalid:
 
 /* PFADD var ele ele ele ... ele => :0 or :1 */
 void pfaddCommand(client *c) {
-    robj *o = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     struct hllhdr *hdr;
     int updated = 0, j;
 
@@ -1640,7 +1641,7 @@ void pfaddCommand(client *c) {
          * hold our HLL data structure. sdsnewlen() when NULL is passed
          * is guaranteed to return bytes initialized to zero. */
         o = createHLLObject();
-        dbAdd(c->db, c->argv[1], &o);
+        dbAddWithIndex(c->db, c->argv[1], &o, dict_index);
         updated++;
     } else {
         if (isHLLObjectOrReply(c, o) != C_OK) return;
@@ -1657,7 +1658,7 @@ void pfaddCommand(client *c) {
     hdr = o->ptr;
     if (updated) {
         HLL_INVALIDATE_CACHE(hdr);
-        signalModifiedKey(c, c->db, c->argv[1]);
+        signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
         notifyKeyspaceEvent(NOTIFY_STRING, "pfadd", c->argv[1], c->db->id);
         server.dirty += updated;
     }
@@ -1790,14 +1791,15 @@ void pfmergeCommand(client *c) {
         }
     }
 
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
     /* Create / unshare the destination key's value if needed. */
-    robj *o = lookupKeyWrite(c->db, c->argv[1]);
+    robj *o = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (o == NULL) {
         /* Create the key with a string value of the exact length to
          * hold our HLL data structure. sdsnewlen() when NULL is passed
          * is guaranteed to return bytes initialized to zero. */
         o = createHLLObject();
-        dbAdd(c->db, c->argv[1], &o);
+        dbAddWithIndex(c->db, c->argv[1], &o, dict_index);
     } else {
         /* If key exists we are sure it's of the right type/size
          * since we checked when merging the different HLLs, so we
@@ -1831,7 +1833,7 @@ void pfmergeCommand(client *c) {
                      last hllSparseSet() call. */
     HLL_INVALIDATE_CACHE(hdr);
 
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     /* We generate a PFADD event for PFMERGE for semantical simplicity
      * since in theory this is a mass-add of elements. */
     notifyKeyspaceEvent(NOTIFY_STRING, "pfadd", c->argv[1], c->db->id);

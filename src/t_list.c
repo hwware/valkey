@@ -462,7 +462,8 @@ void listTypeDelRange(robj *subject, long start, long count) {
 void pushGenericCommand(client *c, int where, int xx) {
     int j;
 
-    robj *lobj = lookupKeyWrite(c->db, c->argv[1]);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *lobj = lookupKeyWriteWithIndex(c->db, c->argv[1], dict_index);
     if (checkType(c, lobj, OBJ_LIST)) return;
     if (!lobj) {
         if (xx) {
@@ -471,7 +472,7 @@ void pushGenericCommand(client *c, int where, int xx) {
         }
 
         lobj = createListListpackObject();
-        dbAdd(c->db, c->argv[1], &lobj);
+        dbAddWithIndex(c->db, c->argv[1], &lobj, dict_index);
     }
 
     listTypeTryConversionAppend(lobj, c->argv, 2, c->argc - 1, NULL, NULL);
@@ -480,7 +481,7 @@ void pushGenericCommand(client *c, int where, int xx) {
         server.dirty++;
     }
 
-    signalModifiedKey(c, c->db, c->argv[1]);
+    signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
     char *event = (where == LIST_HEAD) ? "lpush" : "rpush";
     notifyKeyspaceEvent(NOTIFY_LIST, event, c->argv[1], c->db->id);
 
@@ -514,6 +515,7 @@ void linsertCommand(client *c) {
     listTypeIterator *iter;
     listTypeEntry entry;
     int inserted = 0;
+    int dict_index = 0;
 
     if (strcasecmp(c->argv[2]->ptr, "after") == 0) {
         where = LIST_TAIL;
@@ -524,7 +526,8 @@ void linsertCommand(client *c) {
         return;
     }
 
-    if ((subject = lookupKeyWriteOrReply(c, c->argv[1], shared.czero)) == NULL || checkType(c, subject, OBJ_LIST))
+    dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    if ((subject = lookupKeyWriteOrReplyWithIndex(c, c->argv[1], shared.czero, dict_index)) == NULL || checkType(c, subject, OBJ_LIST))
         return;
 
     /* We're not sure if this value can be inserted yet, but we cannot
@@ -546,7 +549,7 @@ void linsertCommand(client *c) {
     listTypeReleaseIterator(iter);
 
     if (inserted) {
-        signalModifiedKey(c, c->db, c->argv[1]);
+        signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
         notifyKeyspaceEvent(NOTIFY_LIST, "linsert", c->argv[1], c->db->id);
         server.dirty++;
     } else {
@@ -595,7 +598,8 @@ void lindexCommand(client *c) {
 
 /* LSET <key> <index> <element> */
 void lsetCommand(client *c) {
-    robj *o = lookupKeyWriteOrReply(c, c->argv[1], shared.nokeyerr);
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
+    robj *o = lookupKeyWriteOrReplyWithIndex(c, c->argv[1], shared.nokeyerr, dict_index);
     if (o == NULL || checkType(c, o, OBJ_LIST)) return;
     long index;
     robj *value = c->argv[3];
@@ -608,7 +612,7 @@ void lsetCommand(client *c) {
          * already handled the growing case in listTypeTryConversionAppend()
          * above, so here we just need to try the conversion for shrinking. */
         listTypeTryConversion(o, LIST_CONV_SHRINKING, NULL, NULL);
-        signalModifiedKey(c, c->db, c->argv[1]);
+        signalModifiedKeyWithIndex(c, c->db, c->argv[1], dict_index);
         notifyKeyspaceEvent(NOTIFY_LIST, "lset", c->argv[1], c->db->id);
         server.dirty++;
         addReply(c, shared.ok);

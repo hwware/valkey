@@ -1834,13 +1834,14 @@ static void zaddGenericCommand(client *c, int flags) {
         if (elelen > maxelelen) maxelelen = elelen;
     }
 
+    int dict_index = server.cluster_enabled ? getKeySlot(c->argv[1]->ptr) : 0;
     /* Lookup the key and create the sorted set if does not exist. */
-    zobj = lookupKeyWrite(c->db, key);
+    zobj = lookupKeyWriteWithIndex(c->db, key, dict_index);
     if (checkType(c, zobj, OBJ_ZSET)) goto cleanup;
     if (zobj == NULL) {
         if (xx) goto reply_to_client; /* No key + XX option: nothing to do. */
         zobj = zsetTypeCreate(elements, maxelelen);
-        dbAdd(c->db, key, &zobj);
+        dbAddWithIndex(c->db, key, &zobj, dict_index);
     } else {
         zsetTypeMaybeConvert(zobj, elements, maxelelen);
     }
@@ -1865,7 +1866,7 @@ static void zaddGenericCommand(client *c, int flags) {
         server.dirty += (added + updated);
     }
     if (added || updated) {
-        signalModifiedKey(c, c->db, key);
+        signalModifiedKeyWithIndex(c, c->db, key, dict_index);
         notifyKeyspaceEvent(NOTIFY_ZSET, incr ? "zincr" : "zadd", key, c->db->id);
     }
 

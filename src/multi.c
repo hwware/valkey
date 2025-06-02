@@ -426,6 +426,46 @@ void touchWatchedKey(serverDb *db, robj *key) {
     }
 }
 
+void touchWatchedKeyWithIndex(serverDb *db, robj *key, int index) {
+    list *clients;
+    listIter li;
+    listNode *ln;
+
+    if (dictSize(db->watched_keys) == 0) return;
+    clients = dictFetchValue(db->watched_keys, key);
+    if (!clients) return;
+
+    /* Mark all the clients watching this key as CLIENT_DIRTY_CAS */
+    /* Check if we are already watching for this key */
+    listRewind(clients, &li);
+    while ((ln = listNext(&li))) {
+        watchedKey *wk = server_member2struct(watchedKey, node, ln);
+        client *c = wk->client;
+
+        if (wk->expired) {
+            /* The key was already expired when WATCH was called. */
+            if (db == wk->db && equalStringObjects(key, wk->key) && dbFindWithIndex(db, key->ptr, index) == NULL) {
+                /* Already expired key is deleted, so logically no change. Clear
+                 * the flag. Deleted keys are not flagged as expired. */
+                wk->expired = 0;
+                goto skip_client;
+            }
+            break;
+        }
+
+        c->flag.dirty_cas = 1;
+        resetClientMultiState(c);
+        /* As the client is marked as dirty, there is no point in getting here
+         * again in case that key (or others) are modified again (or keep the
+         * memory overhead till EXEC). */
+        unwatchAllKeys(c);
+
+    skip_client:
+        continue;
+    }
+}
+
+
 /* Set CLIENT_DIRTY_CAS to all clients of DB when DB is dirty.
  * It may happen in the following situations:
  * FLUSHDB, FLUSHALL, SWAPDB, end of successful diskless replication.
