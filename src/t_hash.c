@@ -1339,3 +1339,55 @@ void hrandfieldCommand(client *c) {
     hashTypeRandomElement(hash, hashTypeLength(hash), &ele, NULL);
     hashReplyFromListpackEntry(c, &ele);
 }
+
+void hexpireCommand(client *c) {
+    // hexpireGenericCommand(c, commandTimeSnapshot(), UNIT_SECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hexpireAtCommand(client *c) {
+    // hexpireGenericCommand(c, 0, UNIT_SECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hpexpireCommand(client *c) {
+    // hexpireGenericCommand(c, commandTimeSnapshot(), UNIT_MILLISECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hpexpireAtCommand(client *c) {
+    // hexpireGenericCommand(c, 0, UNIT_MILLISECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void httlCommand(client *c) {
+    // httlGenericCommand(c, commandTimeSnapshot(), UNIT_SECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hpttlCommand(client *c) {
+    // httlGenericCommand(c, commandTimeSnapshot(), UNIT_MILLISECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hexpiretimeCommand(client *c) {
+    // httlGenericCommand(c, 0, UNIT_SECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hpexpiretimeCommand(client *c) {
+    // httlGenericCommand(c, 0, UNIT_MILLISECONDS);
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hpersistCommand(client *c) {
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hgetexCommand(client *c) {
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
+
+void hsetexCommand(client *c) {
+    serverLog(LL_WARNING, "Current database id is %d", c->db->id);
+}
