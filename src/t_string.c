@@ -152,9 +152,17 @@ void setGenericCommand(client *c,
      * created again. */
     setkey_flags |= ((flags & OBJ_KEEPTTL) || expire) ? SETKEY_KEEPTTL : 0;
     setkey_flags |= found ? SETKEY_ALREADY_EXIST : SETKEY_DOESNT_EXIST;
+    if (found) {
+        updateKeySizeArray(c, key);
+    } else {
+        c->db->strings_number_of_elements++;
+    }
+
 
     setKey(c, c->db, key, &val, setkey_flags);
     if (expire) val = setExpire(c, c->db, key, milliseconds);
+
+    updateStringKeySizeArray(c, 0, stringObjectLen(val));
 
     /* By setting the reallocated value back into argv, we can avoid duplicating
      * a large string value when adding it to the db. */
@@ -387,8 +395,10 @@ void psetexCommand(client *c) {
 /* DELIFEQ key value */
 void delifeqCommand(client *c) {
     robj *o;
+    long previous_str_len;
     if ((o = lookupKeyWriteOrReply(c, c->argv[1], shared.czero)) == NULL || checkType(c, o, OBJ_STRING)) return;
 
+    previous_str_len = stringObjectLen(o);
     if (compareStringObjects(o, c->argv[2]) != 0) {
         addReply(c, shared.czero);
         return;
@@ -396,6 +406,7 @@ void delifeqCommand(client *c) {
 
     serverAssert(dbSyncDelete(c->db, c->argv[1]));
 
+    updateStringKeySizeArray(c, previous_str_len, 0);
     /* Propagate as DEL command */
     rewriteClientCommandVector(c, 2, shared.del, c->argv[1]);
     signalModifiedKey(c, c->db, c->argv[1]);
@@ -498,8 +509,19 @@ void getexCommand(client *c) {
 }
 
 void getdelCommand(client *c) {
+    robj *o;
+    long previous_str_len;
+
     initDeferredReplyBuffer(c);
-    if (getGenericCommand(c) == C_ERR) return;
+    o = lookupKeyReadOrReply(c, c->argv[1], shared.null[c->resp]);
+    if (checkType(c, o, OBJ_STRING)) return;
+    if (o != NULL) {
+        addReplyBulk(c, o);
+        previous_str_len = stringObjectLen(o);
+    } else {
+        previous_str_len = 0;
+    }
+
     if (dbSyncDelete(c->db, c->argv[1])) {
         /* Propagate as DEL command */
         rewriteClientCommandVector(c, 2, shared.del, c->argv[1]);
@@ -507,18 +529,33 @@ void getdelCommand(client *c) {
         notifyKeyspaceEvent(NOTIFY_GENERIC, "del", c->argv[1], c->db->id);
         server.dirty++;
     }
+    updateStringKeySizeArray(c, previous_str_len, 0);
     commitDeferredReplyBuffer(c, 1);
 }
 
 void getsetCommand(client *c) {
+    robj *o;
+    long previous_str_len;
+    long curr_str_len;
+
     initDeferredReplyBuffer(c);
-    if (getGenericCommand(c) == C_ERR) return;
+    o = lookupKeyReadOrReply(c, c->argv[1], shared.null[c->resp]);
+    if (checkType(c, o, OBJ_STRING)) return;
+    if (o != NULL) {
+        addReplyBulk(c, o);
+        previous_str_len = stringObjectLen(o);
+    } else {
+        previous_str_len = 0;
+    }
+
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setKey(c, c->db, c->argv[1], &c->argv[2], 0);
     incrRefCount(c->argv[2]);
     notifyKeyspaceEvent(NOTIFY_STRING, "set", c->argv[1], c->db->id);
     server.dirty++;
+    curr_str_len = stringObjectLen(c->argv[2]);
 
+    updateStringKeySizeArray(c, previous_str_len, curr_str_len);
     commitDeferredReplyBuffer(c, 1);
     /* Propagate as SET command */
     rewriteClientCommandArgument(c, 0, shared.set);
@@ -528,6 +565,8 @@ void setrangeCommand(client *c) {
     robj *o;
     long offset;
     sds value = c->argv[3]->ptr;
+    long previous_str_len;
+    long curr_str_len;
 
     if (getLongFromObjectOrReply(c, c->argv[2], &offset, NULL) != C_OK)
         return;
@@ -548,8 +587,9 @@ void setrangeCommand(client *c) {
         /* Return when the resulting string exceeds allowed size */
         if (checkStringLength(c, offset, sdslen(value)) != C_OK)
             return;
-
+        previous_str_len = 0;
         o = createObject(OBJ_STRING, sdsnewlen(NULL, offset + sdslen(value)));
+        c->db->strings_number_of_elements++;
         dbAdd(c->db, c->argv[1], &o);
     } else {
         size_t olen;
@@ -564,6 +604,7 @@ void setrangeCommand(client *c) {
             addReplyLongLong(c, olen);
             return;
         }
+        previous_str_len = olen;
 
         /* Return when the resulting string exceeds allowed size */
         if (checkStringLength(c, offset, sdslen(value)) != C_OK)
@@ -578,6 +619,8 @@ void setrangeCommand(client *c) {
     signalModifiedKey(c, c->db, c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_STRING, "setrange", c->argv[1], c->db->id);
     server.dirty++;
+    curr_str_len = sdslen(o->ptr);
+    updateStringKeySizeArray(c, previous_str_len, curr_str_len);
     addReplyLongLong(c, sdslen(o->ptr));
 }
 
@@ -661,10 +704,12 @@ void msetGenericCommand(client *c, int nx) {
 
     int setkey_flags = nx ? SETKEY_DOESNT_EXIST : 0;
     for (j = 1; j < c->argc; j += 2) {
+        updateKeySizeArray(c, c->argv[j]);
         robj *val = tryObjectEncoding(c->argv[j + 1]);
         setKey(c, c->db, c->argv[j], &val, setkey_flags);
         incrRefCount(val);
         c->argv[j + 1] = val;
+        updateStringKeySizeArray(c, 0, stringObjectLen(val));
         notifyKeyspaceEvent(NOTIFY_STRING, "set", c->argv[j], c->db->id);
         /* In MSETNX, It could be that we're overriding the same key, we can't be sure it doesn't exist. */
         if (nx)
@@ -685,6 +730,8 @@ void msetnxCommand(client *c) {
 void incrDecrCommand(client *c, long long incr) {
     long long value, oldvalue;
     robj *o, *new;
+    long previous_str_len;
+    long curr_str_len;
 
     o = lookupKeyWrite(c->db, c->argv[1]);
     if (checkType(c, o, OBJ_STRING)) return;
@@ -698,6 +745,14 @@ void incrDecrCommand(client *c, long long incr) {
     }
     value += incr;
 
+
+    if (o) {
+        previous_str_len = stringObjectLen(o);
+    } else {
+        previous_str_len = 0;
+    }
+
+
     if (o && o->refcount == 1 && o->encoding == OBJ_ENCODING_INT &&
         value >= LONG_MIN && value <= LONG_MAX) {
         new = o;
@@ -710,6 +765,8 @@ void incrDecrCommand(client *c, long long incr) {
             dbAdd(c->db, c->argv[1], &new);
         }
     }
+    curr_str_len = stringObjectLen(new);
+    updateStringKeySizeArray(c, previous_str_len, curr_str_len);
     signalModifiedKey(c, c->db, c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_STRING, "incrby", c->argv[1], c->db->id);
     server.dirty++;
@@ -746,6 +803,8 @@ void decrbyCommand(client *c) {
 void incrbyfloatCommand(client *c) {
     long double incr, value;
     robj *o, *new;
+    long previous_str_len;
+    long curr_str_len;
 
     o = lookupKeyWrite(c->db, c->argv[1]);
     if (checkType(c, o, OBJ_STRING)) return;
@@ -759,10 +818,15 @@ void incrbyfloatCommand(client *c) {
         return;
     }
     new = createStringObjectFromLongDouble(value, 1);
-    if (o)
+    if (o) {
+        previous_str_len = stringObjectLen(o);
         dbReplaceValue(c->db, c->argv[1], &new);
-    else
+    } else {
+        previous_str_len = 0;
         dbAdd(c->db, c->argv[1], &new);
+    }
+    curr_str_len = stringObjectLen(new);
+    updateStringKeySizeArray(c, previous_str_len, curr_str_len);
     signalModifiedKey(c, c->db, c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_STRING, "incrbyfloat", c->argv[1], c->db->id);
     server.dirty++;
@@ -779,6 +843,8 @@ void incrbyfloatCommand(client *c) {
 void appendCommand(client *c) {
     size_t totlen;
     robj *o, *append;
+    long previous_str_len;
+    long curr_str_len;
 
     o = lookupKeyWrite(c->db, c->argv[1]);
     if (o == NULL) {
@@ -787,6 +853,8 @@ void appendCommand(client *c) {
         dbAdd(c->db, c->argv[1], &c->argv[2]);
         incrRefCount(c->argv[2]);
         totlen = stringObjectLen(c->argv[2]);
+        previous_str_len = 0;
+        c->db->strings_number_of_elements++;
     } else {
         /* Key exists, check type */
         if (checkType(c, o, OBJ_STRING))
@@ -797,6 +865,7 @@ void appendCommand(client *c) {
         if (checkStringLength(c, stringObjectLen(o), sdslen(append->ptr)) != C_OK)
             return;
 
+        previous_str_len = stringObjectLen(o);
         /* Append the value */
         o = dbUnshareStringValue(c->db, c->argv[1], o);
         o->ptr = sdscatlen(o->ptr, append->ptr, sdslen(append->ptr));
@@ -805,6 +874,9 @@ void appendCommand(client *c) {
     signalModifiedKey(c, c->db, c->argv[1]);
     notifyKeyspaceEvent(NOTIFY_STRING, "append", c->argv[1], c->db->id);
     server.dirty++;
+    curr_str_len = totlen;
+    /* TO DO: update INFO KEYSIZES  */
+    updateStringKeySizeArray(c, previous_str_len, curr_str_len);
     addReplyLongLong(c, totlen);
 }
 
