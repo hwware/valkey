@@ -6,8 +6,7 @@ void keyinfoFreeEntry(keyinfoEntry *entry) {
     entry->key = NULL;
 }
 
-//nitialize the bigkey log. This function should be called a single time at server startup.
-/*
+
 void keyinfoInit(void) {
     for (int i = 0; i < KEYINFO_TYPE_NUM; i++) {
         server.keyinfo[i].entries_max_len = server.keyinfo[i].max_len;
@@ -15,15 +14,16 @@ void keyinfoInit(void) {
     }
 }
 
+
 static unsigned int getIndex(robj *keyobj, long long max_len) {
     sds key = keyobj->ptr;
     return crc16(key, sdslen(key)) % max_len;
 }
-*/
+
 void keyinfoResize(int type) {
     long long new_len = server.keyinfo[type].max_len;
     keyinfoEntry *entriesResized = zcalloc(sizeof(keyinfoEntry) * new_len);
-    /*
+
     for (long i = 0; i < server.keyinfo[type].entries_max_len; i++) {
         keyinfoEntry *entry = &server.keyinfo[type].entries[i];
         if (entry->key != NULL) {
@@ -33,13 +33,13 @@ void keyinfoResize(int type) {
             entriesResized[idx].time = entry->time;
         }
     }
-    */
+
     zfree(server.keyinfo[type].entries);
     server.keyinfo[type].entries = entriesResized;
     server.keyinfo[type].entries_max_len = new_len;
 }
 
-/*
+
 void keyinfoUpdateEntryIfNeeded(robj *keyobj, long long value, int type) {
     if (server.keyinfo[type].threshold < 0 || server.keyinfo[type].max_len == 0) return; //keyinfo disabled
 
@@ -63,7 +63,7 @@ void keyinfoUpdateEntryIfNeeded(robj *keyobj, long long value, int type) {
     entry->value = value;
     entry->time = time(NULL);
 }
-*/
+
 
 void keyinfoReset(int type) {
     for (long i = 0; i < server.keyinfo[type].max_len; i++) {
@@ -136,7 +136,7 @@ void keyinfoCommand(client *c) {
         }
 
         addReplyArrayLen(c, count);
-        /*
+
             long replied = 0;
             for (long i = 0; i < server.keyinfo[type].max_len && replied < count; i++) {
                 keyinfoEntry *entry = &server.keyinfo[type].entries[i];
@@ -149,7 +149,7 @@ void keyinfoCommand(client *c) {
                     replied++;
                 }
             }
-        */
+
     } else {
         addReplySubcommandSyntaxError(c);
     }

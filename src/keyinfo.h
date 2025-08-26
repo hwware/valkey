@@ -11,6 +11,6 @@ typedef struct keyinfoEntry {
 } keyinfoEntry;
 
 /* Exported API */
-// void keyinfoInit(void);
+void keyinfoInit(void);
 
 #endif /* __KEYINFO_H__ */
