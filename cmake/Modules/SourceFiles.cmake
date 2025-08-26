@@ -119,6 +119,7 @@ set(VALKEY_SERVER_SRCS
     ${CMAKE_SOURCE_DIR}/src/unix.c
     ${CMAKE_SOURCE_DIR}/src/server.c
     ${CMAKE_SOURCE_DIR}/src/logreqres.c
+    ${CMAKE_SOURCE_DIR}/src/keyinfo.c
     ${CMAKE_SOURCE_DIR}/src/entry.c
     ${CMAKE_SOURCE_DIR}/src/vset.c)
 

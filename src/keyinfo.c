@@ -41,7 +41,7 @@ void keyinfoResize(int type) {
 
 
 void keyinfoUpdateEntryIfNeeded(robj *keyobj, long long value, int type) {
-    if (server.keyinfo[type].threshold < 0 || server.keyinfo[type].max_len == 0) return; //keyinfo disabled
+    if (server.keyinfo[type].threshold < 0 || server.keyinfo[type].max_len == 0) return;
 
     unsigned int idx = getIndex(keyobj, server.keyinfo[type].max_len);
     keyinfoEntry *entry = &server.keyinfo[type].entries[idx];
@@ -137,19 +137,18 @@ void keyinfoCommand(client *c) {
 
         addReplyArrayLen(c, count);
 
-            long replied = 0;
-            for (long i = 0; i < server.keyinfo[type].max_len && replied < count; i++) {
-                keyinfoEntry *entry = &server.keyinfo[type].entries[i];
-                if (entry->key != NULL) {
-                    addReplyArrayLen(c, 4);
-                    addReplyLongLong(c, i);
-                    addReplyBulkCBuffer(c, entry->key->ptr, sdslen(entry->key->ptr));
-                    addReplyLongLong(c, entry->value);
-                    addReplyLongLong(c, entry->time);
-                    replied++;
-                }
+        long replied = 0;
+        for (long i = 0; i < server.keyinfo[type].max_len && replied < count; i++) {
+            keyinfoEntry *entry = &server.keyinfo[type].entries[i];
+            if (entry->key != NULL) {
+                addReplyArrayLen(c, 4);
+                addReplyLongLong(c, i);
+                addReplyBulkCBuffer(c, entry->key->ptr, sdslen(entry->key->ptr));
+                addReplyLongLong(c, entry->value);
+                addReplyLongLong(c, entry->time);
+                replied++;
             }
-
+        }
     } else {
         addReplySubcommandSyntaxError(c);
     }
