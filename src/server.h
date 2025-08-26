@@ -3804,6 +3804,7 @@ void bgrewriteaofCommand(client *c);
 void shutdownCommand(client *c);
 void slowlogCommand(client *c);
 void commandlogCommand(client *c);
+void keyinfoCommand(client *c);
 void moveCommand(client *c);
 void copyCommand(client *c);
 void renameCommand(client *c);
