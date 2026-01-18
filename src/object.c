@@ -1299,6 +1299,182 @@ size_t objectComputeSize(robj *key, robj *o, size_t sample_size, int dbid) {
     return asize;
 }
 
+size_t objectComputeSizeFull(robj *key, robj *o, size_t sample_size, int dbid) {
+    size_t asize = 0, elesize = 0, samples = 0;
+
+    if (o->type == OBJ_STRING) {
+        if (o->encoding == OBJ_ENCODING_INT) {
+            asize = sizeof(*o);
+        } else if (o->encoding == OBJ_ENCODING_RAW) {
+            asize = sdsAllocSize(o->ptr) + sizeof(*o);
+        } else if (o->encoding == OBJ_ENCODING_EMBSTR) {
+            asize = zmalloc_size((void *)o);
+        } else {
+            serverPanic("Unknown string encoding");
+        }
+    } else if (o->type == OBJ_LIST) {
+        if (o->encoding == OBJ_ENCODING_QUICKLIST) {
+            quicklist *ql = o->ptr;
+            quicklistNode *node = ql->head;
+            asize = sizeof(*o) + sizeof(quicklist);
+            do {
+                elesize += sizeof(quicklistNode) + zmalloc_size(node->entry);
+                samples++;
+            } while ((node = node->next) && samples < sample_size);
+            asize += (double)elesize / samples * ql->len;
+        } else if (o->encoding == OBJ_ENCODING_LISTPACK) {
+            asize = sizeof(*o) + zmalloc_size(o->ptr);
+        } else {
+            serverPanic("Unknown list encoding");
+        }
+    } else if (o->type == OBJ_SET) {
+        if (o->encoding == OBJ_ENCODING_HASHTABLE) {
+            hashtable *ht = o->ptr;
+            asize = sizeof(*o) + hashtableMemUsage(ht);
+
+            hashtableIterator iter;
+            hashtableInitIterator(&iter, ht, 0);
+            void *next;
+            while (hashtableNext(&iter, &next) && samples < sample_size) {
+                sds element = next;
+                elesize += sdsAllocSize(element);
+                samples++;
+            }
+            hashtableResetIterator(&iter);
+            if (samples) asize += (double)elesize / samples * hashtableSize(ht);
+        } else if (o->encoding == OBJ_ENCODING_INTSET) {
+            asize = sizeof(*o) + zmalloc_size(o->ptr);
+        } else if (o->encoding == OBJ_ENCODING_LISTPACK) {
+            asize = sizeof(*o) + zmalloc_size(o->ptr);
+        } else {
+            serverPanic("Unknown set encoding");
+        }
+    } else if (o->type == OBJ_ZSET) {
+        if (o->encoding == OBJ_ENCODING_LISTPACK) {
+            asize = sizeof(*o) + zmalloc_size(o->ptr);
+        } else if (o->encoding == OBJ_ENCODING_SKIPLIST) {
+            hashtable *ht = ((zset *)o->ptr)->ht;
+            zskiplist *zsl = ((zset *)o->ptr)->zsl;
+            zskiplistNode *znode = zsl->header->level[0].forward;
+            asize = sizeof(*o) + sizeof(zset) + sizeof(zskiplist) +
+                    hashtableMemUsage(ht) + zmalloc_size(zsl->header);
+            while (znode != NULL && samples < sample_size) {
+                elesize += sdsAllocSize(znode->ele);
+                elesize += zmalloc_size(znode);
+                samples++;
+                znode = znode->level[0].forward;
+            }
+            if (samples) asize += (double)elesize / samples * hashtableSize(ht);
+        } else {
+            serverPanic("Unknown sorted set encoding");
+        }
+    } else if (o->type == OBJ_HASH) {
+        if (o->encoding == OBJ_ENCODING_LISTPACK) {
+            asize = sizeof(*o) + zmalloc_size(o->ptr);
+        } else if (o->encoding == OBJ_ENCODING_HASHTABLE) {
+            hashtable *ht = o->ptr;
+            hashtableIterator iter;
+            hashtableInitIterator(&iter, ht, 0);
+            void *next;
+
+            asize = sizeof(*o) + hashtableMemUsage(ht);
+            while (hashtableNext(&iter, &next) && samples < sample_size) {
+                elesize += hashTypeEntryMemUsage(next);
+                samples++;
+            }
+            hashtableResetIterator(&iter);
+            if (samples) asize += (double)elesize / samples * hashtableSize(ht);
+        } else {
+            serverPanic("Unknown hash encoding");
+        }
+    } else if (o->type == OBJ_STREAM) {
+        stream *s = o->ptr;
+        asize = sizeof(*o) + sizeof(*s);
+        asize += raxAllocSize(s->rax);
+
+        /* Now we have to add the listpacks. The last listpack is often non
+         * complete, so we estimate the size of the first N listpacks, and
+         * use the average to compute the size of the first N-1 listpacks, and
+         * finally add the real size of the last node. */
+        raxIterator ri;
+        raxStart(&ri, s->rax);
+        raxSeek(&ri, "^", NULL, 0);
+        size_t lpsize = 0, samples = 0;
+        while (samples < sample_size && raxNext(&ri)) {
+            unsigned char *lp = ri.data;
+            /* Use the allocated size, since we overprovision the node initially. */
+            lpsize += zmalloc_size(lp);
+            samples++;
+        }
+        if (s->rax->numele <= samples) {
+            asize += lpsize;
+        } else {
+            if (samples) lpsize /= samples; /* Compute the average. */
+            asize += lpsize * (s->rax->numele - 1);
+            /* No need to check if seek succeeded, we enter this branch only
+             * if there are a few elements in the radix tree. */
+            raxSeek(&ri, "$", NULL, 0);
+            raxNext(&ri);
+            /* Use the allocated size, since we overprovision the node initially. */
+            asize += zmalloc_size(ri.data);
+        }
+        raxStop(&ri);
+
+        /* Consumer groups also have a non trivial memory overhead if there
+         * are many consumers and many groups, let's count at least the
+         * overhead of the pending entries in the groups and consumers
+         * PELs. */
+        if (s->cgroups) {
+            raxStart(&ri, s->cgroups);
+            raxSeek(&ri, "^", NULL, 0);
+            samples = 0;
+            elesize = 0;
+            while (samples < sample_size && raxNext(&ri)) {
+                streamCG *cg = ri.data;
+                elesize += sizeof(*cg);
+                elesize += raxAllocSize(cg->pel);
+                elesize += sizeof(streamNACK) * raxSize(cg->pel);
+
+                /* For each consumer we also need to add the basic data
+                 * structures and the PEL memory usage. */
+                raxIterator cri;
+                raxStart(&cri, cg->consumers);
+                raxSeek(&cri, "^", NULL, 0);
+                size_t inner_samples = 0;
+                size_t inner_elesize = 0;
+                while (inner_samples < sample_size && raxNext(&cri)) {
+                    streamConsumer *consumer = cri.data;
+                    inner_elesize += sizeof(*consumer);
+                    inner_elesize += sdslen(consumer->name);
+                    inner_elesize += raxAllocSize(consumer->pel);
+                    /* Don't count NACKs again, they are shared with the
+                     * consumer group PEL. */
+                    inner_samples++;
+                }
+                raxStop(&cri);
+                if (inner_samples) elesize += (double)inner_elesize / inner_samples * raxSize(cg->consumers);
+                samples++;
+            }
+            raxStop(&ri);
+            if (samples) asize += (double)elesize / samples * raxSize(s->cgroups);
+        }
+    } else if (o->type == OBJ_MODULE) {
+        asize = moduleGetMemUsage(key, o, sample_size, dbid);
+    } else {
+        serverPanic("Unknown object type");
+    }
+
+    if (key->encoding == OBJ_ENCODING_INT) {
+        asize += sizeof(*key);
+    } else if (key->encoding == OBJ_ENCODING_RAW) {
+        asize += sdsAllocSize(key->ptr) + sizeof(*key);
+    } else if (key->encoding == OBJ_ENCODING_EMBSTR) {
+        asize += zmalloc_size((void *)key);
+    }
+
+    return asize;
+}
+
 /* Release data obtained with getMemoryOverheadData(). */
 void freeMemoryOverheadData(struct serverMemOverhead *mh) {
     zfree(mh->db);
@@ -1722,6 +1898,29 @@ void memoryCommand(client *c) {
             return;
         }
         size_t usage = objectComputeSize(c->argv[2], obj, samples, c->db->id);
+        addReplyLongLong(c, usage);
+    } else if (!strcasecmp(c->argv[1]->ptr, "full-usage") && c->argc >= 3) {
+        long long samples = OBJ_COMPUTE_SIZE_DEF_SAMPLES;
+        for (int j = 3; j < c->argc; j++) {
+            if (!strcasecmp(c->argv[j]->ptr, "samples") && j + 1 < c->argc) {
+                if (getLongLongFromObjectOrReply(c, c->argv[j + 1], &samples, NULL) == C_ERR) return;
+                if (samples < 0) {
+                    addReplyErrorObject(c, shared.syntaxerr);
+                    return;
+                }
+                if (samples == 0) samples = LLONG_MAX;
+                j++; /* skip option argument. */
+            } else {
+                addReplyErrorObject(c, shared.syntaxerr);
+                return;
+            }
+        }
+        robj *obj = dbFind(c->db, c->argv[2]->ptr);
+        if (obj == NULL) {
+            addReplyNull(c);
+            return;
+        }
+        size_t usage = objectComputeSizeFull(c->argv[2], obj, samples, c->db->id);
         addReplyLongLong(c, usage);
     } else if (!strcasecmp(c->argv[1]->ptr, "stats") && c->argc == 2) {
         struct serverMemOverhead *mh = getMemoryOverheadData();
